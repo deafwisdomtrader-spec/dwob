@@ -3159,11 +3159,22 @@ def atualizar_saldo(valor):
             if lbl_saldo:
                 lbl_saldo.config(text="R$ ****")
             return
+        # Valor inválido ou indisponível -> mostrar mensagem clara
+        try:
+            v = safe_parse_float(valor, default=None)
+        except Exception:
+            v = None
+
+        if v is None:
+            if lbl_saldo:
+                try:
+                    lbl_saldo.config(text="Saldo indisponível", fg="#888888", font=("Segoe UI", 9, "italic"))
+                except Exception:
+                    lbl_saldo.config(text="Saldo indisponível")
+            return
 
         valor_formatado = (
-            f"R$ {float(valor):,.2f}".replace(",", "X")
-            .replace(".", ",")
-            .replace("X", ".")
+            f"R$ {float(v):,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
         )
 
         cor = "#ff9800" if (modo and modo.get() == "demo") else "#00ff88"
