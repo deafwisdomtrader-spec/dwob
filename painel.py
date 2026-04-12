@@ -1,154 +1,21 @@
-try:
-    from dotenv import load_dotenv
-except Exception:
-    # Fallback para permitir executar sem python-dotenv instalado (útil para testes locais)
-    def load_dotenv():
-        return None
-
-
-import os
-
-load_dotenv()
-
-from PIL import Image, ImageTk, ImageDraw
-import re
+﻿from PIL import Image, ImageTk, ImageDraw
 import tkinter.font as tkFont
-import logging
-
-# Logging setup
-logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s: %(message)s")
-
-try:
-    from admin import criar_admin
-except Exception:
-    # Fallback: cria função vazia para permitir rodar sem módulo `admin`
-    def criar_admin(*a, **k):
-        return None
-
-
+from admin import criar_admin
 from tkinter import ttk
 import os
-
-
-# Import de `login` feita sob demanda para evitar falha se
-# `iqoptionapi.stable_api` não estiver instalado (login.py faz import direto).
-def abrir_login(*a, **k):
-    try:
-        from login import abrir_login as _abrir_login
-
-        return _abrir_login(*a, **k)
-    except Exception as e:
-        try:
-            logging.warning("login module não disponível ou erro: %s", e)
-        except Exception:
-            pass
-        return None
-
-
+from login import abrir_login
 import tkinter as tk
 from tkinter import simpledialog, messagebox
 from tkinter import scrolledtext
 
 IQ_Option = None
-# Prefer the stable, widely-available API implementation; try `api` first
 try:
     from iqoptionapi.api import IQOptionAPI as IQ_Option
-
-    try:
-        logging.info("usando iqoptionapi.api.IQOptionAPI como IQ_Option")
-    except Exception:
-        pass
-except Exception as _e_api:
-    # Fallback to `stable_api` (some package variants expose this)
-    try:
-        import importlib.util as _il
-        import importlib as _im
-
-        if _il.find_spec("iqoptionapi.stable_api"):
-            try:
-                _mod = _im.import_module("iqoptionapi.stable_api")
-                IQ_Option = getattr(_mod, "IQ_Option", None) or getattr(
-                    _mod, "IQOptionAPI", None
-                )
-                if IQ_Option:
-                    try:
-                        logging.info(
-                            "usando iqoptionapi.stable_api.IQ_Option como IQ_Option"
-                        )
-                    except Exception:
-                        pass
-            except Exception as _e_dyn:
-                IQ_Option = None
-                try:
-                    logging.warning("falha import dinamico stable_api: %s", _e_dyn)
-                except Exception:
-                    pass
-        else:
-            IQ_Option = None
-            try:
-                logging.warning("iqoptionapi não disponível. erro api: %s", _e_api)
-                logging.info(
-                    "Se precisar de conectividade IQ, instale: pip install iqoptionapi"
-                )
-            except Exception:
-                pass
-    except Exception as _e_stable:
-        IQ_Option = None
-        try:
-            logging.warning("iqoptionapi não disponível. erro api: %s", _e_api)
-            logging.warning("erro stable_api: %s", _e_stable)
-            logging.info(
-                "Se precisar de conectividade IQ, instale: pip install iqoptionapi"
-            )
-        except Exception:
-            pass
-
-
-# Se não houver implementação disponível, tentar o adaptador local `iq_adapter.py`
-if IQ_Option is None:
-    try:
-        import iq_adapter as _iq_adapter  # type: ignore
-
-        IQ_Option = _iq_adapter.IQ_Option  # type: ignore
-        try:
-            logging.info("usando iq_adapter.IQ_Option como fallback")
-        except Exception:
-            pass
-    except Exception as _e_adapter:
-        try:
-            logging.warning("iq_adapter não disponível: %s", _e_adapter)
-        except Exception:
-            pass
-
-# Se a implementação encontrada não fornecer a API esperada pelo painel,
-# usar o adaptador local que faz o mapeamento de nomes (get_balance, change_balance, ...)
-try:
-    import iq_adapter as _iq_adapter
-
-    _needs_adapter = False
-    try:
-        # Checar nomes de métodos esperados na classe/objeto
-        expected = ("get_balance", "change_balance", "check_win_v3")
-        present = (
-            any(any(name in s for s in dir(IQ_Option)) for name in expected)
-            if IQ_Option
-            else False
-        )
-        if not present:
-            _needs_adapter = True
-    except Exception:
-        _needs_adapter = True
-    if _needs_adapter:
-        IQ_Option = _iq_adapter.IQ_Option  # type: ignore
-        try:
-            logging.info("usando iq_adapter.IQ_Option por compatibilidade de API")
-        except Exception:
-            pass
 except Exception:
-    pass
-
-# Instância de conexão (inicializada em `iniciar()`)
-Iq = None
+    IQ_Option = None
+# removed stable_api import
+except Exception:
+    IQ_Option = None
 import threading
 import datetime
 import time
@@ -160,7 +27,7 @@ try:
     from controle import abrir_controle
     from config import abrir_config
 except ImportError as e:
-    logging.warning("módulos não encontrados: %s", e)
+    print(f"âš ï¸ mÃ³dulos nÃ£o encontrados: {e}")
 
 
 # Pool de workers para chamadas IQ - evita tempestade de threads E gargalo de fila
@@ -199,14 +66,14 @@ def _iq_worker():
 
             if t.is_alive():
                 result_box["timeout"] = True
-                logging.warning("TIMEOUT IQ: %s %.1fs", call_name, duration)
+                print(f"â±ï¸ IQ TIMEOUT: {call_name} {duration:.1f}s")
             elif res[1] is not None:
                 result_box["error"] = res[1]
-                logging.error("ERRO IQ: %s %.1fs -> %s", call_name, duration, res[1])
+                print(f"âŒ IQ ERROR: {call_name} {duration:.1f}s -> {res[1]}")
             else:
                 result_box["value"] = res[0]
                 if duration >= 0.5:
-                    logging.warning("IQ LENTO: %s %.1fs", call_name, duration)
+                    print(f"â³ IQ SLOW: {call_name} {duration:.1f}s")
         except Exception as e:
             result_box["error"] = e
         finally:
@@ -221,7 +88,7 @@ def _ensure_iq_workers():
 
 
 def safe_iq_call(fn, timeout=3, name=None):
-    """Envia chamada IQ para pool de workers. Bloqueia até resultado ou timeout.
+    """Envia chamada IQ para pool de workers. Bloqueia atÃ© resultado ou timeout.
     NUNCA chamar da thread principal do Tkinter!"""
     try:
         if not Iq:
@@ -236,7 +103,7 @@ def safe_iq_call(fn, timeout=3, name=None):
             return None
         return result_box.get("value")
     except Exception as e:
-        logging.error("erro safe_iq_call: %s", e)
+        print("safe_iq_call error:", e)
         return None
 
 
@@ -248,12 +115,6 @@ data_lock = threading.Lock()
 ultimo_detectado = False
 loop_auto_rodando = False
 candle_thread_rodando = False
-
-# Controle para detecção de nova vela e backoff de polling
-last_candle_from = None
-candle_check_interval_ms = 1000  # intervalo inicial em ms
-candle_no_new_cycles = 0
-_CANDLE_MAX_INTERVAL_MS = 10000
 
 ultima_verificacao = 0
 
@@ -267,7 +128,6 @@ ultimo_request = 0
 ultimo_saldo_operacao = None
 ultimo_log_candle = None
 ultimo_candle_operado = None
-ultimo_candle_from_operado = None
 saldo_cache = {"demo": None, "real": None}
 
 candles = []
@@ -299,7 +159,7 @@ def _get_server_now():
 
 
 def atualizar_timer():
-    """Timer preciso com interpolação IQ."""
+    """Timer preciso com interpolaÃ§Ã£o IQ."""
     global lbl_timer
     try:
         agora = _get_server_now()
@@ -317,148 +177,55 @@ def atualizar_timer():
 
 
 def atualizar_hora():
-    """Atualiza o `lbl_hora` com hora do servidor (se disponível) ou hora local."""
+    """Hora precisa com interpolaÃ§Ã£o IQ."""
     global lbl_hora
     try:
-        agora_ts = _get_server_now()
-        if agora_ts:
-            try:
-                agora_dt = datetime.datetime.fromtimestamp(agora_ts)
-            except Exception:
-                agora_dt = datetime.datetime.now()
-        else:
-            agora_dt = datetime.datetime.now()
-
-        texto = agora_dt.strftime("%H:%M:%S")
-        if lbl_hora:
+        agora = _get_server_now()
+        if agora and lbl_hora is not None:
+            horario = datetime.datetime.fromtimestamp(int(agora))
+            texto = horario.strftime("%H:%M:%S")
             lbl_hora.config(text=texto)
     except Exception:
         pass
-    janela.after(1000, atualizar_hora)
+    janela.after(200, atualizar_hora)
 
 
-def safe_parse_float(txt, default=0.0):
-    """Parse a user-entered money value robustly. Returns float or default.
+candles = []
+candles_antigo = []
+box_win = None
+box_loss = None
 
-    Handles common malformed inputs (extra text/spaces) and both comma/dot decimals.
-    Examples: '0,00' -> 0.0, '0.00  525' -> 0.0, ' R$ 12,34' -> 12.34
-    """
+Iq = None
+
+
+def reconectar_iq():
     try:
-        if txt is None:
-            return default
-        s = str(txt).strip()
-        m = re.search(r"[-+]?\d+(?:[.,]\d+)?", s)
-        if not m:
-            return default
-        num = m.group(0).replace(",", ".")
-        return float(num)
-    except Exception:
-        return default
-
-
-def unsubscribe_stream(par):
-    global Iq, current_stream_par, current_stream_tf
-    try:
-        if not Iq:
-            return False
-        with subscribe_lock:
-            try:
-                # tolerate different method signatures across iqoption clients
-                try:
-                    safe_iq_call(
-                        lambda: Iq.stop_candles_stream(par),
-                        timeout=2,
-                        name="stop_candles_stream",
-                    )
-                except TypeError:
-                    try:
-                        safe_iq_call(
-                            lambda: Iq.stop_candles_stream(par, {}),
-                            timeout=2,
-                            name="stop_candles_stream",
-                        )
-                    except Exception:
-                        pass
-            except Exception:
-                pass
-            if current_stream_par == par:
-                current_stream_par = None
-                current_stream_tf = None
-            return True
-    except Exception:
-        return False
-
-
-def subscribe_stream(par, tf_seconds):
-    """Inicia assinatura de candles para `par` com timeframe em segundos.
-
-    Implementação simples: usa `Iq.start_candles_stream` via `safe_iq_call`
-    e atualiza `current_stream_par` / `current_stream_tf`.
-    """
-    global Iq, current_stream_par, current_stream_tf
-    try:
-        if not Iq:
-            return False
-        with subscribe_lock:
-            try:
-                # Try common signature
-                safe_iq_call(
-                    lambda: Iq.start_candles_stream(par, tf_seconds),
-                    timeout=3,
-                    name="start_candles_stream",
-                )
-            except TypeError:
-                # Some implementations expect an extra `maxdict` param
-                try:
-                    safe_iq_call(
-                        lambda: Iq.start_candles_stream(par, tf_seconds, {}),
-                        timeout=3,
-                        name="start_candles_stream",
-                    )
-                except Exception:
-                    pass
-            except Exception:
-                pass
-            current_stream_par = par
-            current_stream_tf = tf_seconds
-            return True
-    except Exception:
-        return False
+        print("ðŸ”„ Reconectando IQ...")
+        Iq.connect()
+        time.sleep(1)
+        print("âœ… Reconectado")
+    except Exception as e:
+        print("ERRO RECONEXÃƒO:", e)
 
 
 def pegar_candles_iq(par="EURUSD-OTC", timeframe=60, qtd=20):
-    """Busca candles via IQ API e retorna lista de [open, close, max, min]."""
     global Iq
     try:
         if not Iq:
             return []
 
+        # usa safe_iq_call para evitar bloqueio prolongado
         velas = safe_iq_call(
             lambda: Iq.get_candles(par, timeframe, qtd, time.time()),
-            timeout=4,
+            timeout=3,
             name="get_candles",
         )
 
         if not velas:
             return []
-
-        # Aceita tanto lista de dicts quanto formato já transformado
-        lista = []
-        if isinstance(velas, list):
-            for v in velas:
-                try:
-                    if isinstance(v, dict):
-                        o = v.get("open")
-                        c = v.get("close")
-                        mx = v.get("max") or v.get("high")
-                        mn = v.get("min") or v.get("low")
-                        lista.append([o, c, mx, mn])
-                    elif isinstance(v, (list, tuple)) and len(v) >= 4:
-                        lista.append([v[0], v[1], v[2], v[3]])
-                except Exception:
-                    continue
+        lista = [[v["open"], v["close"], v["max"], v["min"]] for v in velas]
         return lista
-    except Exception:
+    except Exception as e:
         return []
 
 
@@ -485,7 +252,7 @@ catalogo = gerar_catalogo(5)
 padrao = "VRVRV"
 dados = catalogo.get(padrao)
 if dados:
-    logging.info("%s", dados)
+    print(dados)
 
 
 def obter_padrao(candles, n=5):
@@ -504,7 +271,7 @@ def obter_padrao(candles, n=5):
         elif fechamento < abertura:
             padrao += "R"
         else:
-            padrao += "D"  # 👈 NÃO IGNORA DOJI
+            padrao += "D"  # ðŸ‘ˆ NÃƒO IGNORA DOJI
 
     return padrao
 
@@ -527,7 +294,7 @@ def escrever_log(widget, msg, tipo="info"):
         ultimalinha = ""
     novalinha = f"[{agora}] {msg}"
 
-    # Remove hora para comparar só mensagem
+    # Remove hora para comparar sÃ³ mensagem
     def limpa_hora(linha):
         if linha.startswith("[") and "]" in linha:
             return linha.split("]", 1)[1].strip()
@@ -550,85 +317,29 @@ def salvar_historico(texto):
 
 
 def criar_avatar_circular(path, tamanho=60):
-    # Tenta carregar a imagem a partir do caminho fornecido e, em falha, tenta
-    # variações comuns (`logo.png`, `logo.webp`, `logo.ico`) dentro da pasta `images`.
-    candidates = []
     try:
-        candidates.append(path)
-    except Exception:
-        pass
-
-    base_dir = os.path.dirname(path) or "images"
-    base_name = os.path.basename(path)
-    name_no_ext = os.path.splitext(base_name)[0]
-
-    for ext in (".png", ".webp", ".ico", ".jpg", ".jpeg", ".bmp"):
-        candidates.append(os.path.join(base_dir, name_no_ext + ext))
-
-    # Também tentar nomes sem depender do `path` dado
-    for alt in ("logo.png", "logo.webp", "logo.ico", "logo.jpg"):
-        candidates.append(os.path.join("images", alt))
-
-    last_err = None
-    # expandir candidatos com caminhos absolutos e relativos ao arquivo
-    expanded = []
-    here = os.path.dirname(os.path.abspath(__file__))
-    for c in candidates:
-        if not c:
-            continue
-        expanded.append(c)
-        expanded.append(os.path.abspath(c))
-        expanded.append(os.path.join(here, c))
-        # se c já for só nome, tente em images/
-        expanded.append(os.path.join(here, "images", os.path.basename(c)))
-
-    tried = []
-    for c in expanded:
-        if not c:
-            continue
-        if c in tried:
-            continue
-        tried.append(c)
-        try:
-            if not os.path.exists(c):
-                continue
-            img = Image.open(c).convert("RGBA")
-            try:
-                img = img.resize((tamanho, tamanho), Image.LANCZOS)
-            except Exception:
-                img = img.resize((tamanho, tamanho))
-            mask = Image.new("L", (tamanho, tamanho), 0)
-            draw = ImageDraw.Draw(mask)
-            draw.ellipse((0, 0, tamanho, tamanho), fill=255)
-            img.putalpha(mask)
-            photo = ImageTk.PhotoImage(img)
-            return photo
-        except Exception as e:
-            last_err = e
-
-    # debug: mostrar candidatos testados e último erro
-    if tried:
-        logging.error("ERRO AVATAR - candidatos testados:")
-        for t in tried:
-            logging.debug("candidate: %s", t)
-    if last_err:
-        logging.error("ERRO AVATAR (ultimo): %s", last_err)
-    return None
+        img = Image.open(path).convert("RGBA").resize((tamanho, tamanho), Image.LANCZOS)
+        mask = Image.new("L", (tamanho, tamanho), 0)
+        draw = ImageDraw.Draw(mask)
+        draw.ellipse((0, 0, tamanho, tamanho), fill=255)
+        img.putalpha(mask)
+        return ImageTk.PhotoImage(img)
+    except Exception as e:
+        print("ERRO AVATAR:", e)
+        return None
 
 
 janela = tk.Tk()
 janela.withdraw()  # esconde IMEDIATAMENTE - sem flash branco
 janela.title("DWOB - MHI EVO")
-janela.geometry("1000x700+100+100")
+janela.geometry("1000x700+-2000+-2000")
 janela.configure(bg="#000000")
-# Nota: não aplicar `option_add` globalmente — mantemos tema escuro apenas
-# nos frames e widgets do painel (cores já definidas explicitamente abaixo).
 janela.bind("<Control-Alt-Shift-F12>", abrir_admin)
 
 try:
     janela.iconbitmap("images/logo.ico")
 except Exception as e:
-    logging.error("ERRO FAVICON: %s", e)
+    print("ERRO FAVICON:", e)
 
 
 def centralizar(j, w=1000, h=700):
@@ -656,7 +367,7 @@ ultima_vela_analisada = None
 
 
 def _draw_rounded_rect(canvas, x1, y1, x2, y2, raio, cor, tag):
-    """Desenha retângulo arredondado no canvas."""
+    """Desenha retÃ¢ngulo arredondado no canvas."""
     r = raio
     canvas.create_arc(
         (x1, y1, x1 + r * 2, y1 + r * 2),
@@ -861,50 +572,18 @@ def criar_rounded_btn(
 
 
 def gerar_sinal():
-    """Gera sinal baseado em candles (MHI simples sobre últimos 3 candles) e catálogo.
-
-    Retorna 'call' ou 'put' (minúsculo) ou None se indeciso.
-    """
-    try:
-        # validação básica (últimos 3 candles)
-        if not candles or len(candles) < 3:
-            return None
-
-        ult3 = candles[-3:]
-        verdes = 0
-        vermelhas = 0
-        for v in ult3:
-            abertura, fechamento = v[0], v[1]
-            if fechamento > abertura:
-                verdes += 1
-            elif fechamento < abertura:
-                vermelhas += 1
-
-        # Se maioria verde -> PUT (inversão proposital conforme regra do usuário)
-        if verdes > vermelhas:
-            return "put"
-        # Se maioria vermelha -> CALL
-        if vermelhas > verdes:
-            return "call"
-        # empate -> não operar
-        return None
-    except Exception as e:
-        logging.error("ERRO gerar_sinal: %s", e)
-        return None
+    return random.choice(["CALL", "PUT"])
 
 
 def fazer_entrada(par, valor, direcao):
     global Iq, operando, ultimo_saldo_operacao
 
-    # Protege leitura/escrita da flag `operando` para evitar entradas duplicadas
-    with threads_lock:
-        if operando:
-            return
-        operando = True
+    if operando:
+        return
 
     try:
         if not Iq:
-            janela.after(0, escrever_log, log, "❌ IQ desconectado", "info")
+            janela.after(0, escrever_log, log, "âŒ IQ desconectado", "info")
             return
 
         operando = True
@@ -913,13 +592,13 @@ def fazer_entrada(par, valor, direcao):
             global operando, ultimo_saldo_operacao
 
             try:
-                # 💰 salva saldo antes
+                # ðŸ’° salva saldo antes
                 try:
                     ultimo_saldo_operacao = safe_iq_call(
                         lambda: Iq.get_balance(), timeout=3, name="get_balance"
                     )
                 except Exception as e:
-                    logging.error("ERRO SALDO OPERAÇÃO: %s", e)
+                    print(f"ERRO SALDO OPERAÃ‡ÃƒO: {e}")
                     ultimo_saldo_operacao = None
 
                 timeframe = 1  # M1
@@ -941,28 +620,25 @@ def fazer_entrada(par, valor, direcao):
                         0,
                         escrever_log,
                         log,
-                        f"✅ ENTRADA {direcao.upper()} R${valor:.2f}",
+                        f"âœ… ENTRADA {direcao.upper()} R${valor:.2f}",
                         "info",
                     )
 
-                    # 🔥 chama resultado automático
+                    # ðŸ”¥ chama resultado automÃ¡tico
                     acompanhar_resultado(id_op)
 
                 else:
-                    with threads_lock:
-                        operando = False
-                    janela.after(0, escrever_log, log, "❌ ERRO AO ENTRAR", "info")
+                    operando = False
+                    janela.after(0, escrever_log, log, "âŒ ERRO AO ENTRAR", "info")
 
             except Exception as e:
-                with threads_lock:
-                    operando = False
+                operando = False
                 janela.after(0, escrever_log, log, f"ERRO ENTRADA: {e}", "info")
 
         threading.Thread(target=executar_entrada, daemon=True).start()
 
     except Exception as e:
-        with threads_lock:
-            operando = False
+        operando = False
         janela.after(0, escrever_log, log, f"ERRO ENTRADA: {e}", "info")
 
 
@@ -972,13 +648,13 @@ def acompanhar_resultado(id_op):
         global ids_resultado_processados
         global wins, loss, lucro_total, ultimo_sinal, candles, catalogo
 
-        # 🚫 BLOQUEIA DUPLICADO
+        # ðŸš« BLOQUEIA DUPLICADO
         if id_op in ids_resultado_processados:
             return
 
         ids_resultado_processados.add(id_op)
 
-        # 🔥 ATUALIZA RESULTADO GLOBAL
+        # ðŸ”¥ ATUALIZA RESULTADO GLOBAL
         def atualizar_resultado(lucro):
             global wins, loss, lucro_total
 
@@ -989,22 +665,23 @@ def acompanhar_resultado(id_op):
                 else:
                     loss += 1
 
+            print("RESULTADO ATUALIZADO:", lucro_total, wins, loss)
+
             janela.after(0, atualizar_painel)
 
         try:
             if not Iq:
                 janela.after(0, escrever_log, log, "IQ desconectado", "info")
-                with threads_lock:
-                    operando = False
+                operando = False
                 return
 
-            lucro = 0  # segurança
+            lucro = 0  # seguranÃ§a
 
-            # ⏳ Espera 55s antes de checar (operação M1 = 60s)
+            # â³ Espera 55s antes de checar (operaÃ§Ã£o M1 = 60s)
             # Sem isso, check_win_v3 fica dando timeout 60x e entope a fila
             time.sleep(55)
 
-            # pega resultado IQ (agora a operação já expirou ou está perto)
+            # pega resultado IQ (agora a operaÃ§Ã£o jÃ¡ expirou ou estÃ¡ perto)
             inicio = time.time()
 
             while True:
@@ -1016,9 +693,8 @@ def acompanhar_resultado(id_op):
                     break
 
                 if time.time() - inicio > 60:
-                    logging.warning("Timeout check_win")
-                    with threads_lock:
-                        operando = False
+                    print("â›” Timeout check_win")
+                    operando = False
                     return
 
                 time.sleep(3)
@@ -1027,8 +703,7 @@ def acompanhar_resultado(id_op):
             if isinstance(resultado, tuple):
                 status, valor = resultado
                 if not status or valor is None:
-                    with threads_lock:
-                        operando = False
+                    operando = False
                     return
                 lucro = float(valor)
             else:
@@ -1036,10 +711,15 @@ def acompanhar_resultado(id_op):
 
             lucro = round(lucro, 2)
 
+            print("RESULTADO REAL:", lucro)
+
             atualizar_resultado(lucro)
 
-            # 🔥 APRENDIZADO (CATALOGO)
+            # ðŸ”¥ APRENDIZADO (CATALOGO)
             padrao = obter_padrao(candles)
+
+            print("DEBUG PADRAO:", padrao)
+            print("DEBUG SINAL:", ultimo_sinal)
 
             if padrao:
                 if padrao not in catalogo:
@@ -1057,16 +737,18 @@ def acompanhar_resultado(id_op):
                     elif ultimo_sinal == "PUT":
                         catalogo[padrao]["CALL"] += 1
 
-            # 📢 log + gale
+                print("CATALOGO:", catalogo.get(padrao))
+
+            # ðŸ“¢ log + gale
             if lucro > 0:
-                msg = f"✅ WIN +R${lucro:.2f}"
+                msg = f"âœ… WIN +R${lucro:.2f}"
                 janela.after(0, lambda m=msg: escrever_log(log, m, "win"))
                 salvar_historico(msg)
                 valor_atual = valor_inicial
                 gale_atual = 0
 
             elif lucro < 0:
-                msg = f"❌ LOSS R${lucro:.2f}"
+                msg = f"âŒ LOSS R${lucro:.2f}"
                 janela.after(0, lambda m=msg: escrever_log(log, m, "loss"))
                 salvar_historico(msg)
 
@@ -1077,7 +759,7 @@ def acompanhar_resultado(id_op):
                         0,
                         escrever_log,
                         log,
-                        f"💥 GALE {gale_atual}/{gale_max} → R${valor_atual:.2f}",
+                        f"ðŸ’¥ GALE {gale_atual}/{gale_max} â†’ R${valor_atual:.2f}",
                         "info",
                     )
                 else:
@@ -1085,19 +767,16 @@ def acompanhar_resultado(id_op):
                     gale_atual = 0
 
             if verificar_stop():
-                with threads_lock:
-                    operando = False
+                operando = False
                 janela.after(0, atualizar_painel)
                 return
 
-            with threads_lock:
-                operando = False
+            operando = False
             janela.after(0, atualizar_painel)
 
         except Exception as e:
             janela.after(0, escrever_log, log, f"ERRO RESULTADO: {e}", "info")
-            with threads_lock:
-                operando = False
+            operando = False
 
     threading.Thread(target=verificar, daemon=True).start()
 
@@ -1155,7 +834,7 @@ def monitor_manual():
                         0,
                         escrever_log,
                         log,
-                        f"🖱️ {direcao.upper()} | R${valor} | {ativo}",
+                        f"ðŸ–±ï¸ {direcao.upper()} | R${valor} | {ativo}",
                         "info",
                     )
                     janela.after(0, lambda i=op_id_str: acompanhar_manual(i))
@@ -1185,18 +864,18 @@ def acompanhar_manual(op_id):
         global wins, loss, lucro_total
         global ids_resultado_processados
 
-        # 🚫 robô ativo = não duplica resultado
+        # ðŸš« robÃ´ ativo = nÃ£o duplica resultado
         if modo_operacao == "auto":
             return
 
         try:
-            # 🚫 evita duplicar resultado
+            # ðŸš« evita duplicar resultado
             if op_id in ids_resultado_processados:
                 return
 
             ids_resultado_processados.add(op_id)
 
-            # 💰 saldo inicial
+            # ðŸ’° saldo inicial
             try:
                 saldo_inicial = safe_iq_call(
                     lambda: Iq.get_balance(), timeout=3, name="get_balance"
@@ -1207,11 +886,11 @@ def acompanhar_manual(op_id):
             if saldo_inicial is None:
                 return
 
-            # ⏱️ espera tempo da operação (OTIMIZADO)
-            for _ in range(61):  # ~61 segundos (não trava seco)
+            # â±ï¸ espera tempo da operaÃ§Ã£o (OTIMIZADO)
+            for _ in range(61):  # ~61 segundos (nÃ£o trava seco)
                 time.sleep(1)
 
-            # 💰 pegar saldo final (mais rápido)
+            # ðŸ’° pegar saldo final (mais rÃ¡pido)
             saldo_final = None
             for _ in range(5):
                 try:
@@ -1227,30 +906,30 @@ def acompanhar_manual(op_id):
             if saldo_final is None:
                 return
 
-            # 📊 cálculo lucro
+            # ðŸ“Š cÃ¡lculo lucro
             lucro = round(saldo_final - saldo_inicial, 2)
 
-            # 🚫 evita duplicação invisível
+            # ðŸš« evita duplicaÃ§Ã£o invisÃ­vel
             if lucro == 0:
                 return
 
-            # 📈 resultado
+            # ðŸ“ˆ resultado
             with data_lock:
                 if lucro > 0:
                     wins += 1
-                    texto = f"✅ WIN +R${lucro:.2f}"
+                    texto = f"âœ… WIN +R${lucro:.2f}"
                     janela.after(0, escrever_log, log, texto, "win")
                 else:
                     loss += 1
-                    texto = f"❌ LOSS R${lucro:.2f}"
+                    texto = f"âŒ LOSS R${lucro:.2f}"
                     janela.after(0, escrever_log, log, texto, "loss")
 
-                # 💰 soma só UMA vez
+                # ðŸ’° soma sÃ³ UMA vez
                 lucro_total += lucro
 
             salvar_historico(texto)
 
-            # 🔥 atualiza painel 1x só
+            # ðŸ”¥ atualiza painel 1x sÃ³
             janela.after(0, atualizar_painel)
 
         except Exception as e:
@@ -1261,7 +940,7 @@ def acompanhar_manual(op_id):
             with threads_lock:
                 threads_rodando = max(0, threads_rodando - 1)
 
-    # ← SEMPRE thread separada, nunca bloqueia UI
+    # â† SEMPRE thread separada, nunca bloqueia UI
     threading.Thread(target=worker, daemon=True).start()
 
 
@@ -1270,9 +949,10 @@ def verificar_stop():
     global stop_ativo, tipo_stop
 
     try:
-        # Use parser tolerant to malformed input (extra spaces/text, comma/dot)
-        gain = safe_parse_float(entry_gain.get())
-        loss = safe_parse_float(entry_loss.get())
+        gain_txt = entry_gain.get().replace(",", ".").strip()
+        loss_txt = entry_loss.get().replace(",", ".").strip()
+        gain = float(gain_txt) if gain_txt else 0
+        loss = float(loss_txt) if loss_txt else 0
 
         if stop_ativo:
             return True
@@ -1281,197 +961,32 @@ def verificar_stop():
             stop_ativo = True
             tipo_stop = "gain"
             rodando = False
-            with threads_lock:
-                operando = False
+            operando = False
             modo_operacao = "manual"
-            janela.after(0, mostrar_alerta_stop, "gain")
+            mostrar_alerta_stop("gain")
             lbl_modo.config(text="META BATIDA", fg="#ffd600")
             lbl_on_status.itemconfig("dot", fill="#ff3333", outline="#ff3333")
             lbl_on_status.itemconfig("dot_text", text="OFF")
-            escrever_log(log, f"🎯 STOP GAIN atingido (+R${lucro_total:.2f})", "win")
+            escrever_log(log, f"ðŸŽ¯ STOP GAIN atingido (+R${lucro_total:.2f})", "win")
             return True
 
         if loss > 0 and lucro_total <= -loss:
             stop_ativo = True
             tipo_stop = "loss"
             rodando = False
-            with threads_lock:
-                operando = False
+            operando = False
             modo_operacao = "manual"
             lbl_modo.config(text="STOP LOSS", fg="#ff5252")
             lbl_on_status.itemconfig("dot", fill="#ff3333", outline="#ff3333")
             lbl_on_status.itemconfig("dot_text", text="OFF")
-            janela.after(0, mostrar_alerta_stop, "loss")
-            escrever_log(log, f"🛑 STOP LOSS atingido (R${lucro_total:.2f})", "loss")
+            mostrar_alerta_stop("loss")
+            escrever_log(log, f"ðŸ›‘ STOP LOSS atingido (R${lucro_total:.2f})", "loss")
             return True
 
     except Exception as e:
         escrever_log(log, f"ERRO STOP: {e}", "info")
 
     return False
-
-
-def definir_stop(tipo):
-    """Abre overlay in-app (pequeno) para definir Stop Gain/Loss."""
-    try:
-        if "frame_alerta_stop" not in globals() or frame_alerta_stop is None:
-            return False
-
-        # limpa conteúdo anterior
-        for w in list(frame_alerta_stop.winfo_children()):
-            try:
-                w.destroy()
-            except Exception:
-                pass
-
-        largura = 300
-        altura = 160
-
-        painel = tk.Frame(frame_alerta_stop, bg="#0f141a", bd=2, relief="ridge")
-        try:
-            painel.place(
-                relx=0.5, rely=0.45, anchor="center", width=largura, height=altura
-            )
-        except Exception:
-            painel.place(relx=0.5, rely=0.45, anchor="center")
-
-        # visual do popup conforme tipo (apenas popup, não altera UI principal)
-        ok_bg = "#2e7d32" if tipo == "gain" else "#d50000"
-        # barra superior colorida para indicar tipo
-        try:
-            top_bar = tk.Frame(painel, bg=ok_bg, height=6)
-            top_bar.pack(fill="x", side="top")
-        except Exception:
-            pass
-
-        titulo = (
-            "Digite o valor do Stop Gain:"
-            if tipo == "gain"
-            else "Digite o valor do Stop Loss:"
-        )
-        tk.Label(painel, text=titulo, bg="#0f141a", fg=ok_bg, font=("Arial", 10)).pack(
-            pady=(8, 2)
-        )
-
-        entrada = tk.Entry(
-            painel,
-            width=18,
-            bg="#1a1f27",
-            fg="white",
-            insertbackground="white",
-            relief="flat",
-        )
-        inicial = (
-            entry_gain.get()
-            if tipo == "gain" and "entry_gain" in globals()
-            else (entry_loss.get() if "entry_loss" in globals() else "0,00")
-        )
-        try:
-            entrada.insert(0, inicial)
-        except Exception:
-            pass
-        entrada.pack()
-        try:
-            entrada.focus_force()
-            try:
-                entrada.select_range(0, "end")
-            except Exception:
-                pass
-            try:
-                painel.focus_set()
-            except Exception:
-                pass
-        except Exception:
-            pass
-
-        def ok():
-            val = entrada.get().strip()
-            try:
-                # Parse user input robustly and reformat as '0,00'
-                v = safe_parse_float(val)
-                if tipo == "gain":
-                    try:
-                        # permitir escrita temporária mesmo que o campo esteja desabilitado
-                        prev = entry_gain.cget("state")
-                        try:
-                            entry_gain.config(state="normal")
-                        except Exception:
-                            pass
-                        entry_gain.delete(0, tk.END)
-                        entry_gain.insert(0, f"{v:,.2f}".replace(".", ","))
-                        try:
-                            entry_gain.config(state=prev)
-                        except Exception:
-                            pass
-                    except Exception:
-                        pass
-                else:
-                    try:
-                        prev = entry_loss.cget("state")
-                        try:
-                            entry_loss.config(state="normal")
-                        except Exception:
-                            pass
-                        entry_loss.delete(0, tk.END)
-                        entry_loss.insert(0, f"{v:,.2f}".replace(".", ","))
-                        try:
-                            entry_loss.config(state=prev)
-                        except Exception:
-                            pass
-                    except Exception:
-                        pass
-            except Exception:
-                pass
-            try:
-                painel.destroy()
-            except Exception:
-                pass
-            try:
-                frame_alerta_stop.lower()
-            except Exception:
-                pass
-
-        def cancelar():
-            try:
-                painel.destroy()
-            except Exception:
-                pass
-            try:
-                frame_alerta_stop.lower()
-            except Exception:
-                pass
-
-        btn_frame = tk.Frame(painel, bg="#0f141a")
-        btn_frame.pack(pady=(8, 4))
-        tk.Button(
-            btn_frame,
-            text="OK",
-            command=ok,
-            width=8,
-            bg=ok_bg,
-            fg="white",
-            relief="flat",
-        ).pack(side="left", padx=6)
-        tk.Button(
-            btn_frame,
-            text="Cancel",
-            command=cancelar,
-            width=8,
-            bg="#9e9e9e",
-            fg="white",
-            relief="flat",
-        ).pack(side="left", padx=6)
-
-        try:
-            frame_alerta_stop.lift()
-        except Exception:
-            pass
-
-        return True
-
-    except Exception as e:
-        escrever_log(log, f"ERRO definir_stop: {e}", "info")
-        return False
 
 
 def verificar_reset_diario():
@@ -1486,7 +1001,7 @@ def verificar_reset_diario():
             lucro_total = 0
             stop_ativo = False
             tipo_stop = None
-            escrever_log(log, "🌅 NOVO DIA - reset automático", "info")
+            escrever_log(log, "ðŸŒ… NOVO DIA - reset automÃ¡tico", "info")
             try:
                 lbl_modo.config(text="AUTO LIBERADO", fg="#00e676")
                 lbl_on_status.itemconfig("dot", fill="#00e676", outline="#00e676")
@@ -1495,7 +1010,7 @@ def verificar_reset_diario():
                 pass
             atualizar_painel()
     except Exception as e:
-        escrever_log(log, f"ERRO RESET DIÁRIO: {e}", "info")
+        escrever_log(log, f"ERRO RESET DIÃRIO: {e}", "info")
 
 
 def loop_reset_diario():
@@ -1510,7 +1025,7 @@ def reset_meia_noite():
         stop_ativo = False
         tipo_stop = None
         data_atual = datetime.date.today()
-        escrever_log(log, "🌙 RESET AUTOMÁTICO 00:00", "info")
+        escrever_log(log, "ðŸŒ™ RESET AUTOMÃTICO 00:00", "info")
         try:
             lbl_modo.config(text="NOVO DIA", fg="#00e676")
             lbl_on_status.itemconfig("dot", fill="#00e676", outline="#00e676")
@@ -1530,7 +1045,7 @@ def agendar_reset_meia_noite():
         meia_noite = datetime.datetime(amanha.year, amanha.month, amanha.day, 0, 0, 0)
         segundos = (meia_noite - agora).total_seconds()
         ms = int(segundos * 1000)
-        logging.info("Reset em %d segundos", int(segundos))
+        print(f"â³ Reset em {int(segundos)} segundos")
         janela.after(ms, reset_meia_noite)
     except Exception as e:
         escrever_log(log, f"ERRO AGENDAR RESET: {e}", "info")
@@ -1552,7 +1067,7 @@ def atualizar_contador_reset():
         if lbl_reset:
             lbl_reset.config(text=texto, fg=cor)
     except Exception as e:
-        logging.error("ERRO contador: %s", e)
+        print("ERRO contador:", e)
     janela.after(1000, atualizar_contador_reset)
 
 
@@ -1564,9 +1079,10 @@ def atualizar_barra_meta():
         if largura <= 1:
             barra_meta.after(100, atualizar_barra_meta)
             return
-        # Parse values robustly (accepts comma/dot and ignores trailing garbage)
-        gain = safe_parse_float(entry_gain.get())
-        loss = safe_parse_float(entry_loss.get())
+        gain_txt = entry_gain.get().replace(",", ".").strip()
+        loss_txt = entry_loss.get().replace(",", ".").strip()
+        gain = float(gain_txt) if gain_txt else 0
+        loss = float(loss_txt) if loss_txt else 0
 
         if gain > 0:
             progresso_gain = max(0, min(lucro_total / gain, 1))
@@ -1596,137 +1112,36 @@ def atualizar_barra_meta():
         if lbl_meta:
             lbl_meta.config(text=texto, fg=cor)
     except Exception as e:
-        logging.error("ERRO barra: %s", e)
+        print("ERRO barra:", e)
     janela.after(1000, atualizar_barra_meta)
 
 
 def mostrar_alerta_stop(tipo):
-    # Mostra overlay centralizado (300x120) — pequeno e silencioso, o usuário fecha
-    try:
-        if "frame_alerta_stop" in globals() and frame_alerta_stop is not None:
-            # limpa conteúdo anterior
-            for w in list(frame_alerta_stop.winfo_children()):
-                try:
-                    w.destroy()
-                except Exception:
-                    pass
-
-            largura = 300
-            altura = 120
-
-            painel = tk.Frame(frame_alerta_stop, bg="#0f141a", bd=2, relief="ridge")
-            try:
-                painel.place(
-                    relx=0.5, rely=0.45, anchor="center", width=largura, height=altura
-                )
-            except Exception:
-                painel.place(relx=0.5, rely=0.45, anchor="center")
-
-            if tipo == "loss":
-                icone = "🛑"
-                titulo = "STOP LOSS"
-                subtitulo = f"Perda de R$ {abs(lucro_total):.2f}"
-                cor_texto = "#ff5252"
-            else:
-                icone = "🏆"
-                titulo = "META ATINGIDA"
-                subtitulo = f"Lucro de R$ {lucro_total:.2f}"
-                cor_texto = "#ffd600"
-
-            # layout: imagem à esquerda + textos à direita
-            content = tk.Frame(painel, bg="#0f141a")
-            content.pack(expand=True, fill="both", padx=8, pady=6)
-
-            img_frame = tk.Frame(content, bg="#0f141a")
-            img_frame.pack(side="left", padx=(0, 8))
-
-            text_frame = tk.Frame(content, bg="#0f141a")
-            text_frame.pack(side="left", fill="both", expand=True)
-
-            avatar_img = None
-            try:
-                base = os.path.dirname(os.path.abspath(__file__))
-                # Prefer logo.png for the popup image (user requested)
-                avatar_img = criar_avatar_circular(
-                    os.path.join(base, "images", "logo.png"), 48
-                )
-            except Exception:
-                avatar_img = None
-
-            if avatar_img:
-                lbl_img = tk.Label(img_frame, image=avatar_img, bg="#0f141a")
-                lbl_img.image = avatar_img
-                lbl_img.pack()
-            else:
-                tk.Label(
-                    img_frame,
-                    text=icone,
-                    bg="#0f141a",
-                    fg=cor_texto,
-                    font=("Segoe UI Emoji", 28),
-                ).pack()
-
-            tk.Label(
-                text_frame,
-                text=f"{titulo}",
-                bg="#0f141a",
-                fg=cor_texto,
-                font=("Segoe UI Black", 12),
-            ).pack(anchor="w")
-
-            tk.Label(
-                text_frame,
-                text=subtitulo,
-                bg="#0f141a",
-                fg="white",
-                font=("Arial", 10),
-                wraplength=largura - 90,
-                justify="left",
-            ).pack(anchor="w", pady=(4, 0))
-
-            def fechar():
-                try:
-                    painel.destroy()
-                except Exception:
-                    pass
-                try:
-                    frame_alerta_stop.lower()
-                except Exception:
-                    pass
-
-            btn = tk.Button(
-                painel,
-                text="Fechar",
-                command=fechar,
-                bg="#222222",
-                fg="white",
-                relief="flat",
-                padx=10,
-                pady=4,
-            )
-            btn.pack()
-            try:
-                btn.focus_force()
-            except Exception:
-                pass
-
-            try:
-                frame_alerta_stop.lift()
-            except Exception:
-                pass
-            return
-
-    except Exception as e:
-        logging.error("ERRO ALERTA OVERLAY: %s", e)
-
-    # fallback final: messagebox
     try:
         if tipo == "loss":
-            messagebox.showinfo("STOP LOSS", f"Perda de R$ {abs(lucro_total):.2f}")
+            texto = "ðŸ›‘ STOP LOSS ATINGIDO"
+            cor = "#ff5252"
         else:
-            messagebox.showinfo("META ATINGIDA", f"Lucro de R$ {lucro_total:.2f}")
+            texto = "ðŸŽ¯ META ATINGIDA"
+            cor = "#ffd600"
+
+        # ðŸ”¥ cria label no topo
+        alerta = tk.Label(
+            janela,
+            text=texto,
+            bg="#000000",
+            fg=cor,
+            font=("Segoe UI Black", 14),
+            pady=5,
+        )
+
+        alerta.place(relx=0.5, y=10, anchor="n")
+
+        # â³ remove depois de 4 segundos
+        janela.after(4000, alerta.destroy)
+
     except Exception as e:
-        logging.error("ERRO ALERTA FINAL: %s", e)
+        print("ERRO ALERTA:", e)
 
 
 def garantir_conexao():
@@ -1745,32 +1160,36 @@ def garantir_conexao():
                     lambda: Iq.check_connect(), timeout=2, name="check_connect"
                 )
                 if not conectado:
-                    janela.after(0, escrever_log, log, "🔌 Reconectando...", "info")
+                    janela.after(0, escrever_log, log, "ðŸ”Œ Reconectando...", "info")
                     safe_iq_call(lambda: Iq.connect(), timeout=4, name="connect")
                     time.sleep(0.5)
                     if safe_iq_call(
                         lambda: Iq.check_connect(), timeout=2, name="check_connect"
                     ):
-                        janela.after(0, escrever_log, log, "✅ Reconectado", "info")
+                        janela.after(0, escrever_log, log, "âœ… Reconectado", "info")
                         try:
-                            subscribe_stream(par_var.get(), 60)
+                            safe_iq_call(
+                                lambda: Iq.start_candles_stream(par_var.get(), 60, 10),
+                                timeout=3,
+                                name="start_candles_stream",
+                            )
                         except Exception:
                             pass
                     else:
-                        janela.after(0, escrever_log, log, "❌ Falha", "info")
+                        janela.after(0, escrever_log, log, "âŒ Falha", "info")
             except Exception as e:
                 janela.after(0, escrever_log, log, f"ERRO: {e}", "info")
 
         threading.Thread(target=verificar_conexao, daemon=True).start()
     except Exception as e:
-        janela.after(0, escrever_log, log, f"ERRO RECONEXÃO: {e}", "info")
+        janela.after(0, escrever_log, log, f"ERRO RECONEXÃƒO: {e}", "info")
 
 
 def loop_conexao():
     try:
         garantir_conexao()
     except Exception as e:
-        janela.after(0, escrever_log, log, f"ERRO LOOP CONEXÃO: {e}", "info")
+        janela.after(0, escrever_log, log, f"ERRO LOOP CONEXÃƒO: {e}", "info")
     janela.after(5000, loop_conexao)
 
 
@@ -1819,15 +1238,15 @@ def atualizar_painel():
     global lucro_total, ultimo_lucro_mostrado
 
     if ultimo_lucro_mostrado != lucro_total:
-        logging.info("ATUALIZANDO UI REAL: %s", lucro_total)
-    ultimo_lucro_mostrado = lucro_total  # ← DEPOIS
+        print("ðŸ”¥ ATUALIZANDO UI REAL:", lucro_total)
+    ultimo_lucro_mostrado = lucro_total  # â† DEPOIS
 
     try:
         if box_win is not None and box_loss is not None:
             box_win.config(text=f"Wins\n{wins}")
             box_loss.config(text=f"Loss\n{loss}")
     except Exception as e:
-        logging.error("ERRO BOX: %s", e)
+        print("ERRO BOX:", e)
 
     try:
         valor = (
@@ -1843,7 +1262,7 @@ def atualizar_painel():
         if lbl_lucro:
             lbl_lucro.config(text=valor, fg=cor)
     except Exception as e:
-        logging.error("ERRO LUCRO: %s", e)
+        print("ERRO LUCRO:", e)
 
     try:
         if ultimo_saldo is not None:
@@ -1859,11 +1278,11 @@ def trocar_conta():
     global Iq, modo, ultimo_update_saldo, saldo_cache
 
     if not Iq:
-        janela.after(0, escrever_log, log, "❌ IQ desconectado", "info")
+        janela.after(0, escrever_log, log, "âŒ IQ desconectado", "info")
         return
 
     if modo is None:
-        janela.after(0, escrever_log, log, "❌ Modo não definido", "info")
+        janela.after(0, escrever_log, log, "âŒ Modo nÃ£o definido", "info")
         return
 
     ultimo_update_saldo = 0
@@ -1877,27 +1296,23 @@ def trocar_conta():
     def executar():
         global saldo_cache
         try:
-            # Troca de conta e leitura de saldo via safe_iq_call (não bloqueante para UI)
-            target = "PRACTICE" if tipo == "demo" else "REAL"
-
-            def _do_change_and_get():
-                try:
-                    Iq.change_balance(target)
-                    return Iq.get_balance()
-                except Exception:
-                    return None
-
-            saldo = safe_iq_call(_do_change_and_get, timeout=6, name="trocar_conta")
-
             if tipo == "demo":
-                janela.after(0, escrever_log, log, "🟠 DEMO", "info")
+                Iq.change_balance("PRACTICE")
+                janela.after(0, escrever_log, log, "ðŸŸ  DEMO", "info")
             else:
-                janela.after(0, escrever_log, log, "🔵 REAL", "info")
+                Iq.change_balance("REAL")
+                janela.after(0, escrever_log, log, "ðŸ”µ REAL", "info")
 
-            if saldo is not None:
-                saldo_cache[tipo] = saldo
-                janela.after(0, escrever_log, log, f"💰 SALDO: R${saldo:.2f}", "info")
-                janela.after(0, lambda: atualizar_saldo(saldo))
+            try:
+                saldo = Iq.get_balance()
+                if saldo is not None:
+                    saldo_cache[tipo] = saldo
+                    janela.after(
+                        0, escrever_log, log, f"ðŸ’° SALDO: R${saldo:.2f}", "info"
+                    )
+                    janela.after(0, lambda: atualizar_saldo(saldo))
+            except Exception as e:
+                janela.after(0, escrever_log, log, f"ERRO SALDO: {e}", "info")
         except Exception as e:
             janela.after(0, escrever_log, log, f"ERRO TROCAR CONTA: {e}", "info")
 
@@ -1905,12 +1320,7 @@ def trocar_conta():
 
 
 ultimo_server_time = None
-_server_sync_local = None  # perf_counter no momento da sincronização
-
-# Controle de assinatura de stream de candles
-current_stream_par = None
-current_stream_tf = None
-subscribe_lock = threading.Lock()
+_server_sync_local = None  # perf_counter no momento da sincronizaÃ§Ã£o
 
 
 def montar_painel():
@@ -1919,20 +1329,7 @@ def montar_painel():
     global entrada_var, par_var, timeframe_var, estrategia_var, radio_var
     global ultimo_server_time
 
-    # Garantir que a janela seja visível e centralizada ao montar o painel
-    try:
-        janela.deiconify()
-        centralizar(janela)
-        janela.lift()
-        try:
-            janela.attributes("-topmost", True)
-            janela.after(500, lambda: janela.attributes("-topmost", False))
-        except Exception:
-            pass
-    except Exception:
-        pass
-
-    entrada_var = tk.StringVar(value="Mão Fixa")
+    entrada_var = tk.StringVar(value="MÃ£o Fixa")
     par_var = tk.StringVar(value="EURUSD-OTC")
     timeframe_var = tk.StringVar(value="M1")
     estrategia_var = tk.StringVar(value="M1-MHI")
@@ -1956,34 +1353,12 @@ def montar_painel():
     topo.pack(side="top", fill="x")
 
     try:
-        base = os.path.dirname(os.path.abspath(__file__))
-        # Tentar várias imagens já presentes em `images/` (prioridade definida)
-        _candidates = ["avatar.png", "logo.png", "iq.png", "logo.webp", "logo.png"]
-        avatar_img = None
-        used_name = None
-        for _name in _candidates:
-            _path = os.path.join(base, "images", _name)
-            try:
-                avatar_img = criar_avatar_circular(_path, 50)
-            except Exception:
-                avatar_img = None
-            if avatar_img is not None:
-                used_name = _name
-                break
-
-        if avatar_img is not None:
-            try:
-                logging.info("avatar loaded: %s", used_name)
-            except Exception:
-                pass
-            avatar = tk.Label(topo, image=avatar_img, bg="#0a0f14")
-            avatar.image = avatar_img
-            # keep avatar visual unchanged (no extra border as requested)
-        else:
-            avatar = tk.Label(topo, text="👤", bg="#0a0f14", fg="white")
+        avatar_img = criar_avatar_circular("images/avatar.png", 50)
+        avatar = tk.Label(topo, image=avatar_img, bg="#0a0f14")
+        avatar.image = avatar_img
     except Exception as e:
-        logging.error("ERRO AVATAR: %s", e)
-        avatar = tk.Label(topo, text="👤", bg="#0a0f14", fg="white")
+        print("ERRO AVATAR:", e)
+        avatar = tk.Label(topo, text="ðŸ‘¤", bg="#0a0f14", fg="white")
 
     avatar.pack(pady=15)
 
@@ -2035,13 +1410,13 @@ def montar_painel():
 
         return frame
 
-    criar_botao_menu(meio, "🏠", lambda: escrever_log(log, "🏠 Tela inicial", "info"))
-    criar_botao_menu(meio, "🌐", lambda: abrir_mercado(janela))
-    criar_botao_menu(meio, "🎮", lambda: abrir_controle(janela))
-    criar_botao_menu(meio, "⚙️", lambda: abrir_config(janela))
+    criar_botao_menu(meio, "ðŸ ", lambda: escrever_log(log, "ðŸ  Tela inicial", "info"))
+    criar_botao_menu(meio, "ðŸŒ", lambda: abrir_mercado(janela))
+    criar_botao_menu(meio, "ðŸŽ®", lambda: abrir_controle(janela))
+    criar_botao_menu(meio, "âš™ï¸", lambda: abrir_config(janela))
 
     btn_sair = tk.Label(
-        baixo, text="❌", bg="#0a0f14", fg="#ef4444", font=("Arial", 16), cursor="hand2"
+        baixo, text="âŒ", bg="#0a0f14", fg="#ef4444", font=("Arial", 16), cursor="hand2"
     )
     btn_sair.pack(pady=15)
     btn_sair.bind("<Enter>", lambda e: btn_sair.config(bg="#111827"))
@@ -2069,7 +1444,7 @@ def montar_painel():
 
     tk.Label(
         linha1,
-        text="Robô de MHI",
+        text="RobÃ´ de MHI",
         fg="#6b7280",
         bg="#0b0f14",
         font=("Arial", 8),
@@ -2077,7 +1452,7 @@ def montar_painel():
 
     lbl_estrategia_header = tk.Label(
         linha1,
-        text="I ESTRATÉGIA MHI",
+        text="I ESTRATÃ‰GIA MHI",
         fg="white",
         bg="#0b0f14",
         font=("Arial", 9, "bold"),
@@ -2093,7 +1468,7 @@ def montar_painel():
             img = Image.open(caminho).resize((20, 20))
             return ImageTk.PhotoImage(img)
         except Exception as e:
-            logging.error("ERRO FLAG: %s", e)
+            print("ERRO FLAG:", e)
             return None
 
     flag_br = carregar_flag("brasil.png")
@@ -2177,7 +1552,7 @@ def montar_painel():
         global wins, loss, lucro_total, stop_ativo, tipo_stop
         global lucro_demo, lucro_real, wins_demo, wins_real, loss_demo, loss_real
 
-        # ← salva estado atual antes de trocar
+        # â† salva estado atual antes de trocar
         if modo.get() == "demo":
             lucro_demo = lucro_total
             wins_demo = wins
@@ -2187,7 +1562,7 @@ def montar_painel():
             wins_real = wins
             loss_real = loss
 
-        # ← restaura estado da conta que vai entrar
+        # â† restaura estado da conta que vai entrar
         if tipo == "demo":
             lucro_total = lucro_demo
             wins = wins_demo
@@ -2255,7 +1630,7 @@ def montar_painel():
                     atualizar_saldo(ultimo_saldo)
                 atualizar_painel()
         except Exception as e:
-            logging.error("ERRO ocultar: %s", e)
+            print("ERRO ocultar:", e)
 
     chk_ocultar = tk.Checkbutton(
         linha3,
@@ -2287,28 +1662,11 @@ def montar_painel():
         width=8,
         bg="#1a1f27",
         fg="white",
-        font=("Arial", 10, "bold"),
         insertbackground="white",
         relief="flat",
     )
     entry_gain.pack(side="left", padx=5)
     entry_gain.insert(0, "0,00")
-    try:
-        # Bloqueia edição direta; valor só pode ser alterado via popup
-        entry_gain.config(state="disabled")
-        try:
-            entry_gain.config(disabledforeground="white", disabledbackground="#1a1f27")
-        except Exception:
-            pass
-        entry_gain.bind("<Button-1>", lambda e: definir_stop("gain"))
-    except Exception:
-        pass
-
-    # Bind para clicar no botão Stop Gain abrir diálogo de definição
-    try:
-        btn_gain_lbl.bind("<Button-1>", lambda e: definir_stop("gain"))
-    except Exception:
-        pass
 
     btn_loss_canvas, btn_loss_lbl = criar_rounded_btn(
         linha3,
@@ -2327,27 +1685,11 @@ def montar_painel():
         width=8,
         bg="#1a1f27",
         fg="white",
-        font=("Arial", 10, "bold"),
         insertbackground="white",
         relief="flat",
     )
     entry_loss.pack(side="left", padx=5)
     entry_loss.insert(0, "0,00")
-    try:
-        entry_loss.config(state="disabled")
-        try:
-            entry_loss.config(disabledforeground="white", disabledbackground="#1a1f27")
-        except Exception:
-            pass
-        entry_loss.bind("<Button-1>", lambda e: definir_stop("loss"))
-    except Exception:
-        pass
-
-    # Bind para clicar no botão Stop Loss abrir diálogo de definição
-    try:
-        btn_loss_lbl.bind("<Button-1>", lambda e: definir_stop("loss"))
-    except Exception:
-        pass
 
     card_entrada, box_entrada_inner = criar_card(
         linha2, "#0f141a", raio=12, borda_cor="#1e88e5", borda_esp=3
@@ -2357,7 +1699,7 @@ def montar_painel():
 
     tk.Label(
         box_entrada_inner,
-        text="Próxima entrada",
+        text="PrÃ³xima entrada",
         bg="#0f141a",
         fg="white",
         font=("Arial", 9),
@@ -2400,7 +1742,7 @@ def montar_painel():
     )
     box_win_canvas.pack(side="right", padx=5)
 
-    # ── Barra inferior (licença + versão) ──
+    # â”€â”€ Barra inferior (licenÃ§a + versÃ£o) â”€â”€
     barra_inferior = tk.Frame(main, bg="#0a0e13", height=24)
     barra_inferior.pack(side="bottom", fill="x")
     barra_inferior.pack_propagate(False)
@@ -2416,7 +1758,7 @@ def montar_painel():
 
     lbl_versao = tk.Label(
         barra_inferior,
-        text="Versão 1.0.0",
+        text="VersÃ£o 1.0.0",
         bg="#0a0e13",
         fg="#4b5563",
         font=("Arial", 7),
@@ -2499,7 +1841,7 @@ def montar_painel():
             )
         canvas.grid_desenhado = True
 
-        # 🚀 LIMPA SÓ AS VELAS (não toca grid)
+        # ðŸš€ LIMPA SÃ“ AS VELAS (nÃ£o toca grid)
         canvas.delete("candle", "linha", "preco")
 
         if not candles:
@@ -2517,7 +1859,7 @@ def montar_painel():
         preco_atual = ultimo[1]
         y_preco = 20 + (max_val - preco_atual) / (max_val - min_val) * (altura - 40)
 
-        # Caixa de preço estilo IQ Option
+        # Caixa de preÃ§o estilo IQ Option
         cor_linha = "#ff9800"
         caixa_larg = 74
         caixa_alt = 22
@@ -2526,7 +1868,7 @@ def montar_painel():
         y1 = y_preco - caixa_alt // 2
         y2 = y_preco + caixa_alt // 2
 
-        # Linha até a caixa (pontilhada)
+        # Linha atÃ© a caixa (pontilhada)
         canvas.create_line(
             0,
             y_preco,
@@ -2570,7 +1912,7 @@ def montar_painel():
             texto1 = texto_preco
             texto2 = ""
 
-        # Texto principal (Arial Narrow, sem negrito, mais próximo da borda, cor preta)
+        # Texto principal (Arial Narrow, sem negrito, mais prÃ³ximo da borda, cor preta)
         canvas.create_text(
             x_caixa + 10,
             y_preco,
@@ -2603,15 +1945,15 @@ def montar_painel():
             )
             x += espaco
 
-    # 🔥 CONTROLE GLOBAL (coloca lá em cima do código)
+    # ðŸ”¥ CONTROLE GLOBAL (coloca lÃ¡ em cima do cÃ³digo)
     candle_thread_rodando = False
 
     def atualizar_candle_real():
         global candle_thread_rodando
 
-        # 🚫 evita múltiplas threads
+        # ðŸš« evita mÃºltiplas threads
         if candle_thread_rodando:
-            canvas.after(max(200, candle_check_interval_ms), atualizar_candle_real)
+            canvas.after(1000, atualizar_candle_real)  # ðŸ”¥ MUITO IMPORTANTE
             return
 
         def buscar():
@@ -2619,98 +1961,44 @@ def montar_painel():
             candle_thread_rodando = True
 
             try:
-                try:
-                    logging.debug("CANDLES: buscar started, Iq=%s", bool(Iq))
-                except Exception:
-                    pass
+                if not Iq:
+                    return
+
                 par = par_var.get()
                 novos = None
 
-                # Tenta obter candles em realtime quando a conexão IQ está disponível;
-                # se não houver conexão, continua para o fallback REST abaixo.
-                dados = None
-                if Iq:
-                    try:
-                        dados = safe_iq_call(
-                            lambda: Iq.get_realtime_candles(par, 60),
-                            timeout=3,
-                            name="get_realtime_candles",
-                        )
-                    except Exception:
-                        dados = None
+                try:
+                    dados = safe_iq_call(
+                        lambda: Iq.get_realtime_candles(par, 60),
+                        timeout=3,
+                        name="get_realtime_candles",
+                    )
+                except Exception:
+                    dados = None
 
                 if dados and isinstance(dados, dict):
                     lista = sorted(dados.values(), key=lambda x: x["from"])
-                    if lista:
-                        latest = lista[-1]
-                        latest_from = latest.get("from")
-                    else:
-                        latest_from = None
+                    if len(lista) >= 5:
+                        novos = [
+                            [v["open"], v["close"], v["max"], v["min"]]
+                            for v in lista[-5:]
+                        ]
 
-                    # Se houver uma vela nova (timestamp diferente), atualiza
-                    global last_candle_from, candle_check_interval_ms, candle_no_new_cycles
-                    if latest_from and latest_from != last_candle_from:
-                        last_candle_from = latest_from
-                        candle_no_new_cycles = 0
-                        # constrói lista de velas se há pelo menos 5
-                        if len(lista) >= 5:
-                            novos = [
-                                [v["open"], v["close"], v["max"], v["min"]]
-                                for v in lista[-5:]
-                            ]
-                    else:
-                        # sem nova vela -> aumento de backoff
-                        candle_no_new_cycles += 1
-                        # aumenta intervalo exponencialmente (limitado)
-                        candle_check_interval_ms = min(
-                            _CANDLE_MAX_INTERVAL_MS, candle_check_interval_ms + 500
-                        )
-                        try:
-                            logging.debug(
-                                "CANDLES: realtime no new -> no_new_cycles=%d interval=%d",
-                                candle_no_new_cycles,
-                                candle_check_interval_ms,
-                            )
-                        except Exception:
-                            pass
-
-                # Se realtime não forneceu dados novos, ocasionalmente buscar via REST
                 if not novos:
-                    # busca completa apenas a cada alguns ciclos para economizar chamadas
-                    if last_candle_from is None or (candle_no_new_cycles % 5 == 0):
-                        tf_map = {"M1": 60, "M5": 300, "M15": 900}
-                        try:
-                            tf_value = timeframe_var.get() if timeframe_var else "M1"
-                            tf_seconds = tf_map.get(tf_value, 60)
-                        except:
-                            tf_seconds = 60
-                        novos = pegar_candles_iq(par, tf_seconds, 5)
-                        try:
-                            logging.debug(
-                                "CANDLES: REST fetch par=%s tf=%s returned=%s",
-                                par,
-                                tf_seconds,
-                                len(novos) if novos is not None else 0,
-                            )
-                        except Exception:
-                            pass
-
-                    # se conseguiu novos via REST, atualiza last_candle_from para reduzir chamadas
-                    if novos and len(novos) >= 1:
-                        try:
-                            # usa timestamp aproximado do último candle se disponível
-                            # não há timestamp na lista retornada aqui, então resetamos backoff
-                            candle_no_new_cycles = 0
-                            candle_check_interval_ms = 1000
-                        except Exception:
-                            pass
+                    tf_map = {"M1": 60, "M5": 300, "M15": 900}
+                    try:
+                        tf_value = timeframe_var.get() if timeframe_var else "M1"
+                        tf_seconds = tf_map.get(tf_value, 60)
+                    except:
+                        tf_seconds = 60
+                    novos = pegar_candles_iq(par, tf_seconds, 5)
 
                 if novos and len(novos) >= 5:
 
                     def atualizar():
-                        global candles, candle_check_interval_ms
+                        global candles
                         candles[:] = novos
-                        janela.after(0, desenhar_tudo)
+                        janela.after(1000, desenhar_tudo)
 
                     janela.after(0, atualizar)
 
@@ -2720,13 +2008,14 @@ def montar_painel():
             finally:
                 candle_thread_rodando = False
 
-        # 🚀 cria thread (SEM check_connect) — sempre inicia para permitir fallback REST
-        threading.Thread(target=buscar, daemon=True).start()
+        # ðŸš€ cria thread (SEM check_connect)
+        if Iq:
+            threading.Thread(target=buscar, daemon=True).start()
 
-        # 🔁 agendamento com backoff dinâmico
-        canvas.after(max(200, candle_check_interval_ms), atualizar_candle_real)
+        # ðŸ” LOOP SEMPRE CONTINUA (NUNCA PARA)
+        canvas.after(1000, atualizar_candle_real)
 
-    # 🚀 inicia o loop (mantém isso)
+    # ðŸš€ inicia o loop (mantÃ©m isso)
     canvas.after(1000, atualizar_candle_real)
 
     def redraw_delay(event):
@@ -2789,7 +2078,6 @@ def montar_painel():
         global candles, ultimo_sinal, gale_atual
         global rodando, operando, loop_auto_rodando
         global ultimo_candle_operado, ultimo_log_candle, info_label
-        global ultimo_candle_from_operado, last_candle_from
         global ultimo_server_time
 
         if not loop_auto_rodando:
@@ -2804,34 +2092,21 @@ def montar_painel():
                 janela.after(1000, atualizar_put_call)
                 return
 
-            # Preferir detecção por timestamp vindo do stream (mais confiável)
-            if last_candle_from is not None:
-                # se não mudou desde a última operação, não fazer nada
-                if last_candle_from == ultimo_candle_from_operado:
-                    janela.after(1000, atualizar_put_call)
-                    return
-                # marca como operada e considera nova vela
-                ultimo_candle_from_operado = last_candle_from
-                # define tempo aproximado para logs
-                agora = _get_server_now() or ultimo_server_time
-                segundos = agora % 60 if agora is not None else 0
-                candle_atual = last_candle_from // 60
-            else:
-                agora = _get_server_now() or ultimo_server_time
-                segundos = agora % 60
-                candle_atual = agora // 60
+            agora = _get_server_now() or ultimo_server_time
+            segundos = agora % 60
+            candle_atual = agora // 60
 
-            # 🧠 log só 1x
+            # ðŸ§  log sÃ³ 1x
             if candle_atual != ultimo_log_candle:
                 ultimo_log_candle = candle_atual
-                janela.after(0, escrever_log, log, "🧠 Nova vela", "info")
+                janela.after(0, escrever_log, log, "ðŸ§  Nova vela", "info")
 
-            # 🚫 evita repetir entrada
+            # ðŸš« evita repetir entrada
             if candle_atual == ultimo_candle_operado:
                 janela.after(1000, atualizar_put_call)
                 return
 
-            # ⏳ só entra nos primeiros segundos
+            # â³ sÃ³ entra nos primeiros segundos
             if segundos > 1:
                 janela.after(1000, atualizar_put_call)
                 return
@@ -2840,39 +2115,51 @@ def montar_painel():
                 janela.after(1000, atualizar_put_call)
                 return
 
-            # Decide direção usando função local robusta (MHI + catálogo)
-            direcao = gerar_sinal()
-            # Se indeciso, não operar
-            if direcao is None:
-                janela.after(1000, atualizar_put_call)
-                return
+            direcao = None
+            padrao = obter_padrao(candles)
 
-            # ⛔ DOJI
+            if padrao and len(padrao) == 5:
+                if padrao in catalogo:
+                    dados = catalogo[padrao]
+                    total = dados["CALL"] + dados["PUT"]
+
+                    if total >= 5:
+                        if dados["CALL"] > dados["PUT"] * 1.3:
+                            direcao = "call"
+                        elif dados["PUT"] > dados["CALL"] * 1.3:
+                            direcao = "put"
+
+                if not direcao:
+                    direcao = random.choice(["call", "put"])
+            else:
+                direcao = random.choice(["call", "put"])
+
+            # â›” DOJI
             if candles:
                 ultima = candles[-1]
                 if ultima[0] == ultima[1]:
                     janela.after(1000, atualizar_put_call)
                     return
 
-            # 🚀 ENTRADA
+            # ðŸš€ ENTRADA
             if direcao:
                 ultimo_candle_operado = candle_atual
 
-                janela.after(0, escrever_log, log, f"🚀 {direcao.upper()}", "info")
+                janela.after(0, escrever_log, log, f"ðŸš€ {direcao.upper()}", "info")
 
                 if direcao == "call":
                     ultimo_sinal = "CALL"
-                    info_label.config(text="CALL ↑", fg="#00e676")
+                    info_label.config(text="CALL â†‘", fg="#00e676")
                 else:
                     ultimo_sinal = "PUT"
-                    info_label.config(text="PUT ↓", fg="#ff5252")
+                    info_label.config(text="PUT â†“", fg="#ff5252")
 
                 fazer_entrada(par_var.get(), valor_atual, direcao)
 
         except Exception as e:
             janela.after(0, escrever_log, log, f"ERRO AUTO: {e}", "info")
 
-        # 🔁 loop leve (não trava CPU)
+        # ðŸ” loop leve (nÃ£o trava CPU)
         if rodando and loop_auto_rodando:
             janela.after(1000, atualizar_put_call)
 
@@ -2887,8 +2174,7 @@ def montar_painel():
         global rodando, modo_operacao, lucro_total, stop_ativo, tipo_stop
         global loop_auto_rodando, operando, wins, loss
 
-        with threads_lock:
-            operando = False
+        operando = False
         loop_auto_rodando = False
 
         if rodando:
@@ -2902,7 +2188,7 @@ def montar_painel():
         stop_ativo = False
         tipo_stop = None
 
-        escrever_log(log, "🤖 ROBÔ AUTOMÁTICO ATIVO", "info")
+        escrever_log(log, "ðŸ¤– ROBÃ” AUTOMÃTICO ATIVO", "info")
         lbl_modo.config(text="AUTO", fg="#00e676")
         lbl_on_status.itemconfig("dot", fill="#00e676", outline="#00e676")
         lbl_on_status.itemconfig("dot_text", text="ON")
@@ -2913,13 +2199,13 @@ def montar_painel():
 
     def parar_auto():
         global rodando, modo_operacao, operando, loop_auto_rodando
+
         rodando = False
-        with threads_lock:
-            operando = False
+        operando = False
         loop_auto_rodando = False
         modo_operacao = "manual"
 
-        escrever_log(log, "✋ MODO MANUAL ATIVO", "info")
+        escrever_log(log, "âœ‹ MODO MANUAL ATIVO", "info")
         lbl_modo.config(text="MANUAL", fg="#ff5252")
         lbl_on_status.itemconfig("dot", fill="#ff3333", outline="#ff3333")
         lbl_on_status.itemconfig("dot_text", text="OFF")
@@ -2927,21 +2213,17 @@ def montar_painel():
 
     def entrada_manual(direcao):
         global operando, modo_operacao
-        janela.after(0, escrever_log, log, f"🖱️ ENTRADA: {direcao.upper()}", "info")
+        janela.after(0, escrever_log, log, f"ðŸ–±ï¸ ENTRADA: {direcao.upper()}", "info")
         modo_operacao = "manual"
-        with threads_lock:
-            can_start = not operando
-            if can_start:
-                operando = True
-        if can_start:
+        if not operando:
             fazer_entrada(par_var.get(), valor_atual, direcao)
 
     style = ttk.Style()
     style.theme_use("default")
     style.configure(
         "Custom.TCombobox",
-        fieldbackground="#000000",
-        background="#000000",
+        fieldbackground="#1565c0",
+        background="#1565c0",
         foreground="white",
     )
     style.map(
@@ -2966,7 +2248,7 @@ def montar_painel():
     ttk.Combobox(
         frame_ctrl,
         textvariable=entrada_var,
-        values=["Mão Fixa", "Soros", "Martingale"],
+        values=["MÃ£o Fixa", "Soros", "Martingale"],
         state="readonly",
         width=16,
         style="Custom.TCombobox",
@@ -2995,19 +2277,19 @@ def montar_painel():
     def mudar_par(event=None):
         global ultimo_par
         novo_par = par_var.get()
-        janela.after(0, escrever_log, log, f"🔄 Par alterado: {novo_par}", "info")
+        janela.after(0, escrever_log, log, f"ðŸ”„ Par alterado: {novo_par}", "info")
 
         def _do_change():
             global ultimo_par
             try:
                 if ultimo_par:
                     try:
-                        unsubscribe_stream(ultimo_par)
+                        Iq.stop_candles_stream(ultimo_par)
                     except Exception:
                         pass
                 try:
-                    subscribe_stream(novo_par, 60)
-                    janela.after(0, escrever_log, log, f"✅ Stream atualizado", "info")
+                    Iq.start_candles_stream(novo_par, 60, 10)
+                    janela.after(0, escrever_log, log, f"âœ… Stream atualizado", "info")
                 except Exception as e:
                     janela.after(0, escrever_log, log, f"ERRO STREAM: {e}", "info")
             finally:
@@ -3039,7 +2321,7 @@ def montar_painel():
         tf_seconds = tf_map.get(novo_tf, 60)
 
         janela.after(
-            0, escrever_log, log, f"⏱️ Timeframe: {novo_tf} ({tf_seconds}s)", "info"
+            0, escrever_log, log, f"â±ï¸ Timeframe: {novo_tf} ({tf_seconds}s)", "info"
         )
 
         def _do_change():
@@ -3047,19 +2329,19 @@ def montar_painel():
                 if Iq:
                     par = par_var.get()
                     try:
-                        unsubscribe_stream(par)
+                        Iq.stop_candles_stream(par)
                     except Exception:
                         pass
                     time.sleep(0.2)
                     try:
-                        subscribe_stream(par, tf_seconds)
+                        Iq.start_candles_stream(par, tf_seconds, 10)
                         janela.after(
-                            0, escrever_log, log, f"✅ Stream atualizado", "info"
+                            0, escrever_log, log, f"âœ… Stream atualizado", "info"
                         )
                     except Exception as e:
-                        janela.after(0, escrever_log, log, f"❌ ERRO: {e}", "info")
+                        janela.after(0, escrever_log, log, f"âŒ ERRO: {e}", "info")
             except Exception as e:
-                janela.after(0, escrever_log, log, f"❌ ERRO: {e}", "info")
+                janela.after(0, escrever_log, log, f"âŒ ERRO: {e}", "info")
 
         threading.Thread(target=_do_change, daemon=True).start()
 
@@ -3113,8 +2395,6 @@ def montar_painel():
     btn_parar_canvas.grid(row=0, column=1, padx=(5, 10), pady=5)
     btn_parar_lbl.bind("<Button-1>", lambda e: parar_auto())
 
-    # (Botões de depuração removidos em produção)
-
     baixo_dir = tk.Frame(dir, bg="#0b0f14")
     baixo_dir.grid(row=1, column=0, sticky="nsew", padx=8, pady=(0, 8))
 
@@ -3125,7 +2405,7 @@ def montar_painel():
 
     lbl_titulo = tk.Label(
         estrategia_box,
-        text="ESTRATÉGIA",
+        text="ESTRATÃ‰GIA",
         fg="#6b7280",
         bg="#000000",
         font=("Segoe UI", 9),
@@ -3218,7 +2498,7 @@ def desenhar_candle(canvas, x, abertura, fechamento, maxima, minima, min_val, ma
     y1 = min(y_open, y_close)
     y2 = max(y_open, y_close)
 
-    # 🎯 CORES IQ OPTION MAIS VIVAS
+    # ðŸŽ¯ CORES IQ OPTION MAIS VIVAS
     if fechamento > abertura:
         cor = "#00ff44"  # verde forte
         cor_pavio = "#00ff44"
@@ -3226,7 +2506,7 @@ def desenhar_candle(canvas, x, abertura, fechamento, maxima, minima, min_val, ma
         cor = "#ff2d2d"  # vermelho forte
         cor_pavio = "#ff2d2d"
 
-    # 🔥 PAVIO (fino, IQ Option)
+    # ðŸ”¥ PAVIO (fino, IQ Option)
     canvas.create_line(
         x,
         y_high,
@@ -3237,7 +2517,7 @@ def desenhar_candle(canvas, x, abertura, fechamento, maxima, minima, min_val, ma
         tags="candle",
     )
 
-    # 🔥 CORPO (grosso, sem borda)
+    # ðŸ”¥ CORPO (grosso, sem borda)
     largura = 32
     canvas.create_rectangle(
         x - largura,
@@ -3257,26 +2537,11 @@ def atualizar_saldo(valor):
             if lbl_saldo:
                 lbl_saldo.config(text="R$ ****")
             return
-        # Valor inválido ou indisponível -> mostrar mensagem clara
-        try:
-            v = safe_parse_float(valor, default=None)
-        except Exception:
-            v = None
-
-        if v is None:
-            if lbl_saldo:
-                try:
-                    lbl_saldo.config(
-                        text="Saldo indisponível",
-                        fg="#888888",
-                        font=("Segoe UI", 9, "italic"),
-                    )
-                except Exception:
-                    lbl_saldo.config(text="Saldo indisponível")
-            return
 
         valor_formatado = (
-            f"R$ {float(v):,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
+            f"R$ {float(valor):,.2f}".replace(",", "X")
+            .replace(".", ",")
+            .replace("X", ".")
         )
 
         cor = "#ff9800" if (modo and modo.get() == "demo") else "#00ff88"
@@ -3292,7 +2557,7 @@ def iniciar(Iq_recebido, saldo=None, email=None, senha=None):
     Iq = Iq_recebido
 
     def atualizar_server_time():
-        """Busca tempo IQ e salva referência local para interpolação."""
+        """Busca tempo IQ e salva referÃªncia local para interpolaÃ§Ã£o."""
         global ultimo_server_time, _server_sync_local
         while True:
             try:
@@ -3309,16 +2574,16 @@ def iniciar(Iq_recebido, saldo=None, email=None, senha=None):
 
     montar_painel()
 
-    janela.after(0, escrever_log, log, "✅ IQ conectado com sucesso", "info")
+    janela.after(0, escrever_log, log, "âœ… IQ conectado com sucesso", "info")
 
-    # Iniciar stream e carregar candles em segundo plano para não travar UI
+    # Iniciar stream e carregar candles em segundo plano para nÃ£o travar UI
     def _init_stream_and_candles():
         try:
             tf_map = {"M1": 60, "M5": 300, "M15": 900}
             tf_value = timeframe_var.get() if timeframe_var else "M1"
             tf_seconds = tf_map.get(tf_value, 60)
             try:
-                subscribe_stream("EURUSD-OTC", tf_seconds)
+                Iq.start_candles_stream("EURUSD-OTC", tf_seconds, 10)
             except Exception as e:
                 print("ERRO STREAM:", e)
 
@@ -3331,10 +2596,9 @@ def iniciar(Iq_recebido, saldo=None, email=None, senha=None):
 
                 janela.after(0, _apply)
 
-            janela.after(0, escrever_log, log, "📊 Candles carregados", "info")
+            janela.after(0, escrever_log, log, "ðŸ“Š Candles carregados", "info")
         except Exception as e:
             janela.after(0, escrever_log, log, f"ERRO INICIAR STREAM: {e}", "info")
-            logging.error("ERRO STREAM: %s", e)
 
     threading.Thread(target=_init_stream_and_candles, daemon=True).start()
 
@@ -3342,36 +2606,16 @@ def iniciar(Iq_recebido, saldo=None, email=None, senha=None):
     def _preload_balances():
         global saldo_cache
         try:
-            # Busca saldos de forma segura via safe_iq_call
-            def _fetch(tipo):
-                try:
-                    target = "PRACTICE" if tipo == "demo" else "REAL"
-                    # troca de conta e obtém saldo em uma única chamada protegida
-                    return safe_iq_call(
-                        lambda: (Iq.change_balance(target), Iq.get_balance())[-1],
-                        timeout=6,
-                        name=f"preload_balance_{tipo}",
-                    )
-                except Exception:
-                    return None
-
-            saldo_demo = _fetch("demo")
+            # Pega saldo demo (conta inicial)
+            saldo_demo = Iq.get_balance()
             if saldo_demo is not None:
                 saldo_cache["demo"] = saldo_demo
-
-            saldo_real = _fetch("real")
+            # Troca pra real, pega saldo, volta pra demo
+            Iq.change_balance("REAL")
+            saldo_real = Iq.get_balance()
             if saldo_real is not None:
                 saldo_cache["real"] = saldo_real
-
-            # tenta restaurar para PRACTICE (não bloqueante)
-            try:
-                safe_iq_call(
-                    lambda: Iq.change_balance("PRACTICE"),
-                    timeout=3,
-                    name="preload_restore",
-                )
-            except Exception:
-                pass
+            Iq.change_balance("PRACTICE")
         except Exception:
             pass
 
@@ -3386,7 +2630,7 @@ def iniciar(Iq_recebido, saldo=None, email=None, senha=None):
     atualizar_contador_reset()
     atualizar_barra_meta()
 
-    # Renderiza invisível → pinta tudo → mostra (sem flash branco)
+    # Renderiza invisÃ­vel â†’ pinta tudo â†’ mostra (sem flash branco)
     janela.attributes("-alpha", 0)  # totalmente transparente
     janela.geometry("1000x650+-2000+-2000")
     janela.deiconify()
@@ -3395,9 +2639,9 @@ def iniciar(Iq_recebido, saldo=None, email=None, senha=None):
     centralizar(janela)  # move pro centro
     janela.attributes("-alpha", 1)  # mostra de vez
 
-    janela.after(500, escrever_log, log, "📊 Candles carregados", "info")
+    janela.after(500, escrever_log, log, "ðŸ“Š Candles carregados", "info")
 
 
-if __name__ == "__main__":
-    abrir_login(janela, iniciar)
-    janela.mainloop()
+abrir_login(janela, iniciar)
+janela.mainloop()
+
