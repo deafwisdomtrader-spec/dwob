@@ -28,7 +28,23 @@ except Exception:
 
 from tkinter import ttk
 import os
-from login import abrir_login
+
+
+# Import de `login` feita sob demanda para evitar falha se
+# `iqoptionapi.stable_api` não estiver instalado (login.py faz import direto).
+def abrir_login(*a, **k):
+    try:
+        from login import abrir_login as _abrir_login
+
+        return _abrir_login(*a, **k)
+    except Exception as e:
+        try:
+            logging.warning("login module não disponível ou erro: %s", e)
+        except Exception:
+            pass
+        return None
+
+
 import tkinter as tk
 from tkinter import simpledialog, messagebox
 from tkinter import scrolledtext
@@ -45,12 +61,37 @@ try:
 except Exception as _e_api:
     # Fallback to `stable_api` (some package variants expose this)
     try:
-        from iqoptionapi.stable_api import IQ_Option
+        import importlib.util as _il
+        import importlib as _im
 
-        try:
-            logging.info("usando iqoptionapi.stable_api.IQ_Option como IQ_Option")
-        except Exception:
-            pass
+        if _il.find_spec("iqoptionapi.stable_api"):
+            try:
+                _mod = _im.import_module("iqoptionapi.stable_api")
+                IQ_Option = getattr(_mod, "IQ_Option", None) or getattr(
+                    _mod, "IQOptionAPI", None
+                )
+                if IQ_Option:
+                    try:
+                        logging.info(
+                            "usando iqoptionapi.stable_api.IQ_Option como IQ_Option"
+                        )
+                    except Exception:
+                        pass
+            except Exception as _e_dyn:
+                IQ_Option = None
+                try:
+                    logging.warning("falha import dinamico stable_api: %s", _e_dyn)
+                except Exception:
+                    pass
+        else:
+            IQ_Option = None
+            try:
+                logging.warning("iqoptionapi não disponível. erro api: %s", _e_api)
+                logging.info(
+                    "Se precisar de conectividade IQ, instale: pip install iqoptionapi"
+                )
+            except Exception:
+                pass
     except Exception as _e_stable:
         IQ_Option = None
         try:
@@ -66,8 +107,9 @@ except Exception as _e_api:
 # Se não houver implementação disponível, tentar o adaptador local `iq_adapter.py`
 if IQ_Option is None:
     try:
-        from iq_adapter import IQ_Option  # type: ignore
+        import iq_adapter as _iq_adapter  # type: ignore
 
+        IQ_Option = _iq_adapter.IQ_Option  # type: ignore
         try:
             logging.info("usando iq_adapter.IQ_Option como fallback")
         except Exception:
@@ -321,11 +363,22 @@ def unsubscribe_stream(par):
             return False
         with subscribe_lock:
             try:
-                safe_iq_call(
-                    lambda: Iq.stop_candles_stream(par),
-                    timeout=2,
-                    name="stop_candles_stream",
-                )
+                # tolerate different method signatures across iqoption clients
+                try:
+                    safe_iq_call(
+                        lambda: Iq.stop_candles_stream(par),
+                        timeout=2,
+                        name="stop_candles_stream",
+                    )
+                except TypeError:
+                    try:
+                        safe_iq_call(
+                            lambda: Iq.stop_candles_stream(par, {}),
+                            timeout=2,
+                            name="stop_candles_stream",
+                        )
+                    except Exception:
+                        pass
             except Exception:
                 pass
             if current_stream_par == par:
@@ -348,11 +401,22 @@ def subscribe_stream(par, tf_seconds):
             return False
         with subscribe_lock:
             try:
+                # Try common signature
                 safe_iq_call(
                     lambda: Iq.start_candles_stream(par, tf_seconds),
                     timeout=3,
                     name="start_candles_stream",
                 )
+            except TypeError:
+                # Some implementations expect an extra `maxdict` param
+                try:
+                    safe_iq_call(
+                        lambda: Iq.start_candles_stream(par, tf_seconds, {}),
+                        timeout=3,
+                        name="start_candles_stream",
+                    )
+                except Exception:
+                    pass
             except Exception:
                 pass
             current_stream_par = par
@@ -555,7 +619,7 @@ def criar_avatar_circular(path, tamanho=60):
 janela = tk.Tk()
 janela.withdraw()  # esconde IMEDIATAMENTE - sem flash branco
 janela.title("DWOB - MHI EVO")
-janela.geometry("1000x700+-2000+-2000")
+janela.geometry("1000x700+100+100")
 janela.configure(bg="#000000")
 # Nota: não aplicar `option_add` globalmente — mantemos tema escuro apenas
 # nos frames e widgets do painel (cores já definidas explicitamente abaixo).
@@ -1855,6 +1919,19 @@ def montar_painel():
     global entrada_var, par_var, timeframe_var, estrategia_var, radio_var
     global ultimo_server_time
 
+    # Garantir que a janela seja visível e centralizada ao montar o painel
+    try:
+        janela.deiconify()
+        centralizar(janela)
+        janela.lift()
+        try:
+            janela.attributes("-topmost", True)
+            janela.after(500, lambda: janela.attributes("-topmost", False))
+        except Exception:
+            pass
+    except Exception:
+        pass
+
     entrada_var = tk.StringVar(value="Mão Fixa")
     par_var = tk.StringVar(value="EURUSD-OTC")
     timeframe_var = tk.StringVar(value="M1")
@@ -2542,20 +2619,25 @@ def montar_painel():
             candle_thread_rodando = True
 
             try:
-                if not Iq:
-                    return
-
+                try:
+                    logging.debug("CANDLES: buscar started, Iq=%s", bool(Iq))
+                except Exception:
+                    pass
                 par = par_var.get()
                 novos = None
 
-                try:
-                    dados = safe_iq_call(
-                        lambda: Iq.get_realtime_candles(par, 60),
-                        timeout=3,
-                        name="get_realtime_candles",
-                    )
-                except Exception:
-                    dados = None
+                # Tenta obter candles em realtime quando a conexão IQ está disponível;
+                # se não houver conexão, continua para o fallback REST abaixo.
+                dados = None
+                if Iq:
+                    try:
+                        dados = safe_iq_call(
+                            lambda: Iq.get_realtime_candles(par, 60),
+                            timeout=3,
+                            name="get_realtime_candles",
+                        )
+                    except Exception:
+                        dados = None
 
                 if dados and isinstance(dados, dict):
                     lista = sorted(dados.values(), key=lambda x: x["from"])
@@ -2583,6 +2665,14 @@ def montar_painel():
                         candle_check_interval_ms = min(
                             _CANDLE_MAX_INTERVAL_MS, candle_check_interval_ms + 500
                         )
+                        try:
+                            logging.debug(
+                                "CANDLES: realtime no new -> no_new_cycles=%d interval=%d",
+                                candle_no_new_cycles,
+                                candle_check_interval_ms,
+                            )
+                        except Exception:
+                            pass
 
                 # Se realtime não forneceu dados novos, ocasionalmente buscar via REST
                 if not novos:
@@ -2595,6 +2685,15 @@ def montar_painel():
                         except:
                             tf_seconds = 60
                         novos = pegar_candles_iq(par, tf_seconds, 5)
+                        try:
+                            logging.debug(
+                                "CANDLES: REST fetch par=%s tf=%s returned=%s",
+                                par,
+                                tf_seconds,
+                                len(novos) if novos is not None else 0,
+                            )
+                        except Exception:
+                            pass
 
                     # se conseguiu novos via REST, atualiza last_candle_from para reduzir chamadas
                     if novos and len(novos) >= 1:
@@ -2621,9 +2720,8 @@ def montar_painel():
             finally:
                 candle_thread_rodando = False
 
-        # 🚀 cria thread (SEM check_connect)
-        if Iq:
-            threading.Thread(target=buscar, daemon=True).start()
+        # 🚀 cria thread (SEM check_connect) — sempre inicia para permitir fallback REST
+        threading.Thread(target=buscar, daemon=True).start()
 
         # 🔁 agendamento com backoff dinâmico
         canvas.after(max(200, candle_check_interval_ms), atualizar_candle_real)
@@ -3168,7 +3266,11 @@ def atualizar_saldo(valor):
         if v is None:
             if lbl_saldo:
                 try:
-                    lbl_saldo.config(text="Saldo indisponível", fg="#888888", font=("Segoe UI", 9, "italic"))
+                    lbl_saldo.config(
+                        text="Saldo indisponível",
+                        fg="#888888",
+                        font=("Segoe UI", 9, "italic"),
+                    )
                 except Exception:
                     lbl_saldo.config(text="Saldo indisponível")
             return
