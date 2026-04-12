@@ -56,9 +56,54 @@ except Exception as _e_api:
         try:
             logging.warning("iqoptionapi não disponível. erro api: %s", _e_api)
             logging.warning("erro stable_api: %s", _e_stable)
-            logging.info("Se precisar de conectividade IQ, instale: pip install iqoptionapi")
+            logging.info(
+                "Se precisar de conectividade IQ, instale: pip install iqoptionapi"
+            )
         except Exception:
             pass
+
+
+# Se não houver implementação disponível, tentar o adaptador local `iq_adapter.py`
+if IQ_Option is None:
+    try:
+        from iq_adapter import IQ_Option  # type: ignore
+
+        try:
+            logging.info("usando iq_adapter.IQ_Option como fallback")
+        except Exception:
+            pass
+    except Exception as _e_adapter:
+        try:
+            logging.warning("iq_adapter não disponível: %s", _e_adapter)
+        except Exception:
+            pass
+
+# Se a implementação encontrada não fornecer a API esperada pelo painel,
+# usar o adaptador local que faz o mapeamento de nomes (get_balance, change_balance, ...)
+try:
+    import iq_adapter as _iq_adapter
+
+    _needs_adapter = False
+    try:
+        # Checar nomes de métodos esperados na classe/objeto
+        expected = ("get_balance", "change_balance", "check_win_v3")
+        present = (
+            any(any(name in s for s in dir(IQ_Option)) for name in expected)
+            if IQ_Option
+            else False
+        )
+        if not present:
+            _needs_adapter = True
+    except Exception:
+        _needs_adapter = True
+    if _needs_adapter:
+        IQ_Option = _iq_adapter.IQ_Option  # type: ignore
+        try:
+            logging.info("usando iq_adapter.IQ_Option por compatibilidade de API")
+        except Exception:
+            pass
+except Exception:
+    pass
 
 # Instância de conexão (inicializada em `iniciar()`)
 Iq = None
@@ -1244,19 +1289,6 @@ def definir_stop(tipo):
             pady=(8, 2)
         )
 
-        # Tenta exibir `logo.png` acima do campo de valor (pedido do usuário)
-        try:
-            base = os.path.dirname(os.path.abspath(__file__))
-            popup_img = criar_avatar_circular(
-                os.path.join(base, "images", "logo.png"), 48
-            )
-            if popup_img:
-                lbl_popup_img = tk.Label(painel, image=popup_img, bg="#0f141a")
-                lbl_popup_img.image = popup_img
-                lbl_popup_img.pack(pady=(2, 4))
-        except Exception:
-            pass
-
         entrada = tk.Entry(
             painel,
             width=18,
@@ -1622,7 +1654,7 @@ def mostrar_alerta_stop(tipo):
 
     except Exception as e:
         logging.error("ERRO ALERTA OVERLAY: %s", e)
-    
+
     # fallback final: messagebox
     try:
         if tipo == "loss":
@@ -1781,23 +1813,27 @@ def trocar_conta():
     def executar():
         global saldo_cache
         try:
+            # Troca de conta e leitura de saldo via safe_iq_call (não bloqueante para UI)
+            target = "PRACTICE" if tipo == "demo" else "REAL"
+
+            def _do_change_and_get():
+                try:
+                    Iq.change_balance(target)
+                    return Iq.get_balance()
+                except Exception:
+                    return None
+
+            saldo = safe_iq_call(_do_change_and_get, timeout=6, name="trocar_conta")
+
             if tipo == "demo":
-                Iq.change_balance("PRACTICE")
                 janela.after(0, escrever_log, log, "🟠 DEMO", "info")
             else:
-                Iq.change_balance("REAL")
                 janela.after(0, escrever_log, log, "🔵 REAL", "info")
 
-            try:
-                saldo = Iq.get_balance()
-                if saldo is not None:
-                    saldo_cache[tipo] = saldo
-                    janela.after(
-                        0, escrever_log, log, f"💰 SALDO: R${saldo:.2f}", "info"
-                    )
-                    janela.after(0, lambda: atualizar_saldo(saldo))
-            except Exception as e:
-                janela.after(0, escrever_log, log, f"ERRO SALDO: {e}", "info")
+            if saldo is not None:
+                saldo_cache[tipo] = saldo
+                janela.after(0, escrever_log, log, f"💰 SALDO: R${saldo:.2f}", "info")
+                janela.after(0, lambda: atualizar_saldo(saldo))
         except Exception as e:
             janela.after(0, escrever_log, log, f"ERRO TROCAR CONTA: {e}", "info")
 
@@ -1860,7 +1896,7 @@ def montar_painel():
 
         if avatar_img is not None:
             try:
-                    logging.info("avatar loaded: %s", used_name)
+                logging.info("avatar loaded: %s", used_name)
             except Exception:
                 pass
             avatar = tk.Label(topo, image=avatar_img, bg="#0a0f14")
@@ -1975,13 +2011,13 @@ def montar_painel():
     lbl_modo = tk.Label(linha1, text="", fg="#ff5252", bg="#0b0f14", font=("Arial", 1))
 
     def carregar_flag(nome):
-            try:
-                caminho = os.path.join("images", nome)
-                img = Image.open(caminho).resize((20, 20))
-                return ImageTk.PhotoImage(img)
-            except Exception as e:
-                logging.error("ERRO FLAG: %s", e)
-                return None
+        try:
+            caminho = os.path.join("images", nome)
+            img = Image.open(caminho).resize((20, 20))
+            return ImageTk.PhotoImage(img)
+        except Exception as e:
+            logging.error("ERRO FLAG: %s", e)
+            return None
 
     flag_br = carregar_flag("brasil.png")
     flag_es = carregar_flag("espanha.png")
@@ -3193,16 +3229,36 @@ def iniciar(Iq_recebido, saldo=None, email=None, senha=None):
     def _preload_balances():
         global saldo_cache
         try:
-            # Pega saldo demo (conta inicial)
-            saldo_demo = Iq.get_balance()
+            # Busca saldos de forma segura via safe_iq_call
+            def _fetch(tipo):
+                try:
+                    target = "PRACTICE" if tipo == "demo" else "REAL"
+                    # troca de conta e obtém saldo em uma única chamada protegida
+                    return safe_iq_call(
+                        lambda: (Iq.change_balance(target), Iq.get_balance())[-1],
+                        timeout=6,
+                        name=f"preload_balance_{tipo}",
+                    )
+                except Exception:
+                    return None
+
+            saldo_demo = _fetch("demo")
             if saldo_demo is not None:
                 saldo_cache["demo"] = saldo_demo
-            # Troca pra real, pega saldo, volta pra demo
-            Iq.change_balance("REAL")
-            saldo_real = Iq.get_balance()
+
+            saldo_real = _fetch("real")
             if saldo_real is not None:
                 saldo_cache["real"] = saldo_real
-            Iq.change_balance("PRACTICE")
+
+            # tenta restaurar para PRACTICE (não bloqueante)
+            try:
+                safe_iq_call(
+                    lambda: Iq.change_balance("PRACTICE"),
+                    timeout=3,
+                    name="preload_restore",
+                )
+            except Exception:
+                pass
         except Exception:
             pass
 
