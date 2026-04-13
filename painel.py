@@ -23,6 +23,7 @@ import datetime
 import time
 import random
 import itertools
+import traceback
 
 try:
     from mercado import abrir_mercado
@@ -1127,25 +1128,59 @@ def mostrar_alerta_stop(tipo):
             texto = "META ATINGIDA"
             cor = "#ffd600"
 
-        # Se overlay global existir, usa-o (mais seguro e consistente)
+        # Tenta usar overlay global seguro: verifica via globals() para evitar NameError
         try:
-            if frame_alerta_stop is not None and lbl_alerta_stop is not None:
-                lbl_alerta_stop.config(text=texto, fg=cor)
-                frame_alerta_stop.lift()
+            frame = globals().get("frame_alerta_stop")
+            lbl = globals().get("lbl_alerta_stop")
+            if frame is not None and lbl is not None:
+                try:
+                    lbl.config(text=texto, fg=cor)
+                    frame.lift()
 
-                def esconder():
+                    def esconder():
+                        try:
+                            frame.lower()
+                        except Exception:
+                            pass
+
+                    janela.after(4000, esconder)
+                    return
+                except Exception:
+                    # se falhar ao usar o overlay, tentamos recriá-lo abaixo
+                    pass
+        except Exception:
+            pass
+
+        # Tenta criar o overlay global se não existir (mais robusto que fallback imediato)
+        try:
+            if globals().get("frame_alerta_stop") is None:
+                f = tk.Frame(janela, bg="#000000")
+                f.place(relx=0, rely=0, relwidth=1, relheight=1)
+                f.lower()
+                l = tk.Label(
+                    f,
+                    text=texto,
+                    bg="#000000",
+                    fg=cor,
+                    font=("Segoe UI Black", 40, "bold"),
+                )
+                l.pack(expand=True)
+                globals()["frame_alerta_stop"] = f
+                globals()["lbl_alerta_stop"] = l
+                f.lift()
+
+                def esconder2():
                     try:
-                        frame_alerta_stop.lower()
+                        f.lower()
                     except Exception:
                         pass
 
-                janela.after(4000, esconder)
+                janela.after(4000, esconder2)
                 return
         except Exception:
-            # segue para fallback mínimo
             pass
 
-        # fallback: label simples no topo
+        # fallback mínimo: label simples no topo
         alerta = tk.Label(
             janela,
             text=texto,
@@ -1161,8 +1196,8 @@ def mostrar_alerta_stop(tipo):
             4000, lambda: (alerta.destroy() if alerta.winfo_exists() else None)
         )
 
-    except Exception as e:
-        print("ERRO ALERTA:", e)
+    except Exception:
+        traceback.print_exc()
 
 
 def garantir_conexao():
