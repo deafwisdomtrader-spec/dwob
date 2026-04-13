@@ -240,7 +240,30 @@ def abrir_admin(event=None):
     senha = simpledialog.askstring("Acesso restrito", "Senha admin:", show="*")
     if senha is None:
         return
-    if senha == os.getenv("ADMIN_SENHA"):
+
+    # Carrega senha admin a partir de ENV ou de config (se presente)
+    admin_senha = os.getenv("ADMIN_SENHA")
+    if not admin_senha:
+        try:
+            import json
+
+            if os.path.exists("config/user.json"):
+                cfg = json.load(open("config/user.json", "r", encoding="utf-8"))
+                admin_senha = cfg.get("admin_senha") or admin_senha
+            elif os.path.exists("config/user.example.json"):
+                cfg = json.load(open("config/user.example.json", "r", encoding="utf-8"))
+                admin_senha = cfg.get("admin_senha") or admin_senha
+        except Exception:
+            admin_senha = admin_senha
+
+    if not admin_senha:
+        messagebox.showinfo(
+            "Senha não configurada",
+            "Senha admin não está configurada. Defina a variável de ambiente ADMIN_SENHA ou atualize config/user.json",
+        )
+        return
+
+    if senha == admin_senha:
         criar_admin()
     else:
         messagebox.showerror("Erro", "Senha incorreta")
@@ -1235,6 +1258,7 @@ def garantir_conexao():
                             )
                         except Exception:
                             pass
+
                         # tentar destruir alerta de forma segura (pode não existir)
                         def _safe_destroy_alert():
                             try:
