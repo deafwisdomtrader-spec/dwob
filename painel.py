@@ -18,6 +18,10 @@ except Exception:
         from iqoptionapi.api import IQOptionAPI as IQ_Option
     except Exception:
         IQ_Option = None
+# Allow forcing DummyIQ for local testing via env var
+if os.getenv("USE_DUMMY_IQ") == "1":
+    IQ_Option = None
+    print("⚠️ Forçando modo DummyIQ via USE_DUMMY_IQ=1")
 import threading
 import datetime
 import time
@@ -1231,7 +1235,16 @@ def garantir_conexao():
                             )
                         except Exception:
                             pass
-                        janela.after(4000, alerta.destroy)
+                        # tentar destruir alerta de forma segura (pode não existir)
+                        def _safe_destroy_alert():
+                            try:
+                                a = globals().get("alerta")
+                                if a is not None and a.winfo_exists():
+                                    a.destroy()
+                            except Exception:
+                                pass
+
+                        janela.after(4000, _safe_destroy_alert)
                         janela.after(0, escrever_log, log, "Falha", "info")
             except Exception as e:
                 janela.after(0, escrever_log, log, f"ERRO: {e}", "info")
