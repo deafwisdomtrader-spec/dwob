@@ -61,4 +61,4 @@ config/user.json
 
 # Pyright/Pylance
 .mypy_cache/
-.pyright/
+.pyright/scripts/
