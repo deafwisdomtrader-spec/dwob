@@ -10,12 +10,14 @@ from tkinter import scrolledtext
 
 IQ_Option = None
 try:
-    from iqoptionapi.api import IQOptionAPI as IQ_Option
+    # Prefer the local adapter which normalizes different iqoptionapi variants
+    from iq_adapter import IQ_Option
 except Exception:
     IQ_Option = None
-# removed stable_api import
-except Exception:
-    IQ_Option = None
+    try:
+        from iqoptionapi.api import IQOptionAPI as IQ_Option
+    except Exception:
+        IQ_Option = None
 import threading
 import datetime
 import time
@@ -27,7 +29,7 @@ try:
     from controle import abrir_controle
     from config import abrir_config
 except ImportError as e:
-    print(f"âš ï¸ mÃ³dulos nÃ£o encontrados: {e}")
+    print(f"Módulos não encontrados: {e}")
 
 
 # Pool de workers para chamadas IQ - evita tempestade de threads E gargalo de fila
@@ -66,14 +68,14 @@ def _iq_worker():
 
             if t.is_alive():
                 result_box["timeout"] = True
-                print(f"â±ï¸ IQ TIMEOUT: {call_name} {duration:.1f}s")
+                print(f"TIMEOUT IQ: {call_name} {duration:.1f}s")
             elif res[1] is not None:
                 result_box["error"] = res[1]
-                print(f"âŒ IQ ERROR: {call_name} {duration:.1f}s -> {res[1]}")
+                print(f"ERRO IQ: {call_name} {duration:.1f}s -> {res[1]}")
             else:
                 result_box["value"] = res[0]
                 if duration >= 0.5:
-                    print(f"â³ IQ SLOW: {call_name} {duration:.1f}s")
+                    print(f"IQ LENTO: {call_name} {duration:.1f}s")
         except Exception as e:
             result_box["error"] = e
         finally:
@@ -200,12 +202,12 @@ Iq = None
 
 def reconectar_iq():
     try:
-        print("ðŸ”„ Reconectando IQ...")
+        print("Reconectando IQ...")
         Iq.connect()
         time.sleep(1)
-        print("âœ… Reconectado")
+        print("Reconectado")
     except Exception as e:
-        print("ERRO RECONEXÃƒO:", e)
+        print("ERRO RECONEXÃO:", e)
 
 
 def pegar_candles_iq(par="EURUSD-OTC", timeframe=60, qtd=20):
@@ -271,7 +273,7 @@ def obter_padrao(candles, n=5):
         elif fechamento < abertura:
             padrao += "R"
         else:
-            padrao += "D"  # ðŸ‘ˆ NÃƒO IGNORA DOJI
+            padrao += "D"  # DOJI
 
     return padrao
 
@@ -313,7 +315,7 @@ def salvar_historico(texto):
             f.write(f"[{data}] {texto}\n")
     except Exception as e:
         if log:
-            janela.after(0, escrever_log, log, f"ERRO HISTORICO: {e}", "info")
+            janela.after(0, escrever_log, log, f"ERRO HISTÓRICO: {e}", "info")
 
 
 def criar_avatar_circular(path, tamanho=60):
@@ -583,7 +585,7 @@ def fazer_entrada(par, valor, direcao):
 
     try:
         if not Iq:
-            janela.after(0, escrever_log, log, "âŒ IQ desconectado", "info")
+            janela.after(0, escrever_log, log, "IQ desconectado", "info")
             return
 
         operando = True
@@ -592,13 +594,13 @@ def fazer_entrada(par, valor, direcao):
             global operando, ultimo_saldo_operacao
 
             try:
-                # ðŸ’° salva saldo antes
+                # salva saldo antes
                 try:
                     ultimo_saldo_operacao = safe_iq_call(
                         lambda: Iq.get_balance(), timeout=3, name="get_balance"
                     )
                 except Exception as e:
-                    print(f"ERRO SALDO OPERAÃ‡ÃƒO: {e}")
+                    print(f"ERRO SALDO OPERAÇÃO: {e}")
                     ultimo_saldo_operacao = None
 
                 timeframe = 1  # M1
@@ -620,16 +622,16 @@ def fazer_entrada(par, valor, direcao):
                         0,
                         escrever_log,
                         log,
-                        f"âœ… ENTRADA {direcao.upper()} R${valor:.2f}",
+                        f"ENTRADA {direcao.upper()} R${valor:.2f}",
                         "info",
                     )
 
-                    # ðŸ”¥ chama resultado automÃ¡tico
+                    # chama resultado automático
                     acompanhar_resultado(id_op)
 
                 else:
                     operando = False
-                    janela.after(0, escrever_log, log, "âŒ ERRO AO ENTRAR", "info")
+                    janela.after(0, escrever_log, log, "ERRO AO ENTRAR", "info")
 
             except Exception as e:
                 operando = False
@@ -648,13 +650,13 @@ def acompanhar_resultado(id_op):
         global ids_resultado_processados
         global wins, loss, lucro_total, ultimo_sinal, candles, catalogo
 
-        # ðŸš« BLOQUEIA DUPLICADO
+        # BLOQUEIA DUPLICADO
         if id_op in ids_resultado_processados:
             return
 
         ids_resultado_processados.add(id_op)
 
-        # ðŸ”¥ ATUALIZA RESULTADO GLOBAL
+        # ATUALIZA RESULTADO GLOBAL
         def atualizar_resultado(lucro):
             global wins, loss, lucro_total
 
@@ -677,7 +679,7 @@ def acompanhar_resultado(id_op):
 
             lucro = 0  # seguranÃ§a
 
-            # â³ Espera 55s antes de checar (operaÃ§Ã£o M1 = 60s)
+            # Espera 55s antes de checar (operação M1 = 60s)
             # Sem isso, check_win_v3 fica dando timeout 60x e entope a fila
             time.sleep(55)
 
@@ -693,7 +695,7 @@ def acompanhar_resultado(id_op):
                     break
 
                 if time.time() - inicio > 60:
-                    print("â›” Timeout check_win")
+                    print("Timeout check_win")
                     operando = False
                     return
 
@@ -715,10 +717,10 @@ def acompanhar_resultado(id_op):
 
             atualizar_resultado(lucro)
 
-            # ðŸ”¥ APRENDIZADO (CATALOGO)
+            # APRENDIZADO (CATÁLOGO)
             padrao = obter_padrao(candles)
 
-            print("DEBUG PADRAO:", padrao)
+            print("DEBUG PADRÃO:", padrao)
             print("DEBUG SINAL:", ultimo_sinal)
 
             if padrao:
@@ -737,18 +739,18 @@ def acompanhar_resultado(id_op):
                     elif ultimo_sinal == "PUT":
                         catalogo[padrao]["CALL"] += 1
 
-                print("CATALOGO:", catalogo.get(padrao))
+                print("CATÁLOGO:", catalogo.get(padrao))
 
-            # ðŸ“¢ log + gale
-            if lucro > 0:
-                msg = f"âœ… WIN +R${lucro:.2f}"
-                janela.after(0, lambda m=msg: escrever_log(log, m, "win"))
+                # log + gale
+                if lucro > 0:
+                    msg = f"GANHO +R${lucro:.2f}"
+                    janela.after(0, lambda m=msg: escrever_log(log, m, "win"))
                 salvar_historico(msg)
                 valor_atual = valor_inicial
                 gale_atual = 0
 
             elif lucro < 0:
-                msg = f"âŒ LOSS R${lucro:.2f}"
+                msg = f"PERDA R${lucro:.2f}"
                 janela.after(0, lambda m=msg: escrever_log(log, m, "loss"))
                 salvar_historico(msg)
 
@@ -759,7 +761,7 @@ def acompanhar_resultado(id_op):
                         0,
                         escrever_log,
                         log,
-                        f"ðŸ’¥ GALE {gale_atual}/{gale_max} â†’ R${valor_atual:.2f}",
+                        f"GALE {gale_atual}/{gale_max} -> R${valor_atual:.2f}",
                         "info",
                     )
                 else:
@@ -834,7 +836,7 @@ def monitor_manual():
                         0,
                         escrever_log,
                         log,
-                        f"ðŸ–±ï¸ {direcao.upper()} | R${valor} | {ativo}",
+                        f"Operação {direcao.upper()} | R${valor} | {ativo}",
                         "info",
                     )
                     janela.after(0, lambda i=op_id_str: acompanhar_manual(i))
@@ -864,18 +866,18 @@ def acompanhar_manual(op_id):
         global wins, loss, lucro_total
         global ids_resultado_processados
 
-        # ðŸš« robÃ´ ativo = nÃ£o duplica resultado
+        # robô ativo = não duplica resultado
         if modo_operacao == "auto":
             return
 
         try:
-            # ðŸš« evita duplicar resultado
+            # evita duplicar resultado
             if op_id in ids_resultado_processados:
                 return
 
             ids_resultado_processados.add(op_id)
 
-            # ðŸ’° saldo inicial
+            # saldo inicial
             try:
                 saldo_inicial = safe_iq_call(
                     lambda: Iq.get_balance(), timeout=3, name="get_balance"
@@ -886,11 +888,11 @@ def acompanhar_manual(op_id):
             if saldo_inicial is None:
                 return
 
-            # â±ï¸ espera tempo da operaÃ§Ã£o (OTIMIZADO)
+            # espera tempo da operação (OTIMIZADO)
             for _ in range(61):  # ~61 segundos (nÃ£o trava seco)
                 time.sleep(1)
 
-            # ðŸ’° pegar saldo final (mais rÃ¡pido)
+            # pegar saldo final (mais rápido)
             saldo_final = None
             for _ in range(5):
                 try:
@@ -906,30 +908,30 @@ def acompanhar_manual(op_id):
             if saldo_final is None:
                 return
 
-            # ðŸ“Š cÃ¡lculo lucro
+            # cálculo lucro
             lucro = round(saldo_final - saldo_inicial, 2)
 
-            # ðŸš« evita duplicaÃ§Ã£o invisÃ­vel
+            # evita duplicação invisível
             if lucro == 0:
                 return
 
-            # ðŸ“ˆ resultado
+            # resultado
             with data_lock:
                 if lucro > 0:
                     wins += 1
-                    texto = f"âœ… WIN +R${lucro:.2f}"
+                    texto = f"GANHO +R${lucro:.2f}"
                     janela.after(0, escrever_log, log, texto, "win")
                 else:
                     loss += 1
-                    texto = f"âŒ LOSS R${lucro:.2f}"
+                    texto = f"PERDA R${lucro:.2f}"
                     janela.after(0, escrever_log, log, texto, "loss")
 
-                # ðŸ’° soma sÃ³ UMA vez
+                # soma só UMA vez
                 lucro_total += lucro
 
             salvar_historico(texto)
 
-            # ðŸ”¥ atualiza painel 1x sÃ³
+            # atualiza painel 1x só
             janela.after(0, atualizar_painel)
 
         except Exception as e:
@@ -940,7 +942,7 @@ def acompanhar_manual(op_id):
             with threads_lock:
                 threads_rodando = max(0, threads_rodando - 1)
 
-    # â† SEMPRE thread separada, nunca bloqueia UI
+    # SEMPRE thread separada, nunca bloqueia UI
     threading.Thread(target=worker, daemon=True).start()
 
 
@@ -967,7 +969,7 @@ def verificar_stop():
             lbl_modo.config(text="META BATIDA", fg="#ffd600")
             lbl_on_status.itemconfig("dot", fill="#ff3333", outline="#ff3333")
             lbl_on_status.itemconfig("dot_text", text="OFF")
-            escrever_log(log, f"ðŸŽ¯ STOP GAIN atingido (+R${lucro_total:.2f})", "win")
+            escrever_log(log, f"STOP GAIN atingido (+R${lucro_total:.2f})", "win")
             return True
 
         if loss > 0 and lucro_total <= -loss:
@@ -980,7 +982,7 @@ def verificar_stop():
             lbl_on_status.itemconfig("dot", fill="#ff3333", outline="#ff3333")
             lbl_on_status.itemconfig("dot_text", text="OFF")
             mostrar_alerta_stop("loss")
-            escrever_log(log, f"ðŸ›‘ STOP LOSS atingido (R${lucro_total:.2f})", "loss")
+            escrever_log(log, f"STOP LOSS atingido (R${lucro_total:.2f})", "loss")
             return True
 
     except Exception as e:
@@ -1001,7 +1003,7 @@ def verificar_reset_diario():
             lucro_total = 0
             stop_ativo = False
             tipo_stop = None
-            escrever_log(log, "ðŸŒ… NOVO DIA - reset automÃ¡tico", "info")
+            escrever_log(log, "NOVO DIA - reset automático", "info")
             try:
                 lbl_modo.config(text="AUTO LIBERADO", fg="#00e676")
                 lbl_on_status.itemconfig("dot", fill="#00e676", outline="#00e676")
@@ -1025,7 +1027,7 @@ def reset_meia_noite():
         stop_ativo = False
         tipo_stop = None
         data_atual = datetime.date.today()
-        escrever_log(log, "ðŸŒ™ RESET AUTOMÃTICO 00:00", "info")
+        escrever_log(log, "RESET AUTOMÁTICO 00:00", "info")
         try:
             lbl_modo.config(text="NOVO DIA", fg="#00e676")
             lbl_on_status.itemconfig("dot", fill="#00e676", outline="#00e676")
@@ -1045,7 +1047,7 @@ def agendar_reset_meia_noite():
         meia_noite = datetime.datetime(amanha.year, amanha.month, amanha.day, 0, 0, 0)
         segundos = (meia_noite - agora).total_seconds()
         ms = int(segundos * 1000)
-        print(f"â³ Reset em {int(segundos)} segundos")
+        print(f"Reset em {int(segundos)} segundos")
         janela.after(ms, reset_meia_noite)
     except Exception as e:
         escrever_log(log, f"ERRO AGENDAR RESET: {e}", "info")
@@ -1119,13 +1121,31 @@ def atualizar_barra_meta():
 def mostrar_alerta_stop(tipo):
     try:
         if tipo == "loss":
-            texto = "ðŸ›‘ STOP LOSS ATINGIDO"
+            texto = "STOP LOSS ATINGIDO"
             cor = "#ff5252"
         else:
-            texto = "ðŸŽ¯ META ATINGIDA"
+            texto = "META ATINGIDA"
             cor = "#ffd600"
 
-        # ðŸ”¥ cria label no topo
+        # Se overlay global existir, usa-o (mais seguro e consistente)
+        try:
+            if frame_alerta_stop is not None and lbl_alerta_stop is not None:
+                lbl_alerta_stop.config(text=texto, fg=cor)
+                frame_alerta_stop.lift()
+
+                def esconder():
+                    try:
+                        frame_alerta_stop.lower()
+                    except Exception:
+                        pass
+
+                janela.after(4000, esconder)
+                return
+        except Exception:
+            # segue para fallback mínimo
+            pass
+
+        # fallback: label simples no topo
         alerta = tk.Label(
             janela,
             text=texto,
@@ -1137,8 +1157,9 @@ def mostrar_alerta_stop(tipo):
 
         alerta.place(relx=0.5, y=10, anchor="n")
 
-        # â³ remove depois de 4 segundos
-        janela.after(4000, alerta.destroy)
+        janela.after(
+            4000, lambda: (alerta.destroy() if alerta.winfo_exists() else None)
+        )
 
     except Exception as e:
         print("ERRO ALERTA:", e)
@@ -1160,13 +1181,13 @@ def garantir_conexao():
                     lambda: Iq.check_connect(), timeout=2, name="check_connect"
                 )
                 if not conectado:
-                    janela.after(0, escrever_log, log, "ðŸ”Œ Reconectando...", "info")
+                    janela.after(0, escrever_log, log, "Reconectando...", "info")
                     safe_iq_call(lambda: Iq.connect(), timeout=4, name="connect")
                     time.sleep(0.5)
                     if safe_iq_call(
                         lambda: Iq.check_connect(), timeout=2, name="check_connect"
                     ):
-                        janela.after(0, escrever_log, log, "âœ… Reconectado", "info")
+                        janela.after(0, escrever_log, log, "Reconectado", "info")
                         try:
                             safe_iq_call(
                                 lambda: Iq.start_candles_stream(par_var.get(), 60, 10),
@@ -1175,8 +1196,8 @@ def garantir_conexao():
                             )
                         except Exception:
                             pass
-                    else:
-                        janela.after(0, escrever_log, log, "âŒ Falha", "info")
+                        janela.after(4000, alerta.destroy)
+                        janela.after(0, escrever_log, log, "Falha", "info")
             except Exception as e:
                 janela.after(0, escrever_log, log, f"ERRO: {e}", "info")
 
@@ -1238,7 +1259,7 @@ def atualizar_painel():
     global lucro_total, ultimo_lucro_mostrado
 
     if ultimo_lucro_mostrado != lucro_total:
-        print("ðŸ”¥ ATUALIZANDO UI REAL:", lucro_total)
+        print("ATUALIZANDO UI REAL:", lucro_total)
     ultimo_lucro_mostrado = lucro_total  # â† DEPOIS
 
     try:
@@ -1278,11 +1299,11 @@ def trocar_conta():
     global Iq, modo, ultimo_update_saldo, saldo_cache
 
     if not Iq:
-        janela.after(0, escrever_log, log, "âŒ IQ desconectado", "info")
+        janela.after(0, escrever_log, log, "IQ desconectado", "info")
         return
 
     if modo is None:
-        janela.after(0, escrever_log, log, "âŒ Modo nÃ£o definido", "info")
+        janela.after(0, escrever_log, log, "Modo não definido", "info")
         return
 
     ultimo_update_saldo = 0
@@ -1298,18 +1319,16 @@ def trocar_conta():
         try:
             if tipo == "demo":
                 Iq.change_balance("PRACTICE")
-                janela.after(0, escrever_log, log, "ðŸŸ  DEMO", "info")
+                janela.after(0, escrever_log, log, "DEMO", "info")
             else:
                 Iq.change_balance("REAL")
-                janela.after(0, escrever_log, log, "ðŸ”µ REAL", "info")
+                janela.after(0, escrever_log, log, "REAL", "info")
 
             try:
                 saldo = Iq.get_balance()
                 if saldo is not None:
                     saldo_cache[tipo] = saldo
-                    janela.after(
-                        0, escrever_log, log, f"ðŸ’° SALDO: R${saldo:.2f}", "info"
-                    )
+                    janela.after(0, escrever_log, log, f"SALDO: R${saldo:.2f}", "info")
                     janela.after(0, lambda: atualizar_saldo(saldo))
             except Exception as e:
                 janela.after(0, escrever_log, log, f"ERRO SALDO: {e}", "info")
@@ -1358,7 +1377,7 @@ def montar_painel():
         avatar.image = avatar_img
     except Exception as e:
         print("ERRO AVATAR:", e)
-        avatar = tk.Label(topo, text="ðŸ‘¤", bg="#0a0f14", fg="white")
+        avatar = tk.Label(topo, text="Usuário", bg="#0a0f14", fg="white")
 
     avatar.pack(pady=15)
 
@@ -1410,13 +1429,18 @@ def montar_painel():
 
         return frame
 
-    criar_botao_menu(meio, "ðŸ ", lambda: escrever_log(log, "ðŸ  Tela inicial", "info"))
-    criar_botao_menu(meio, "ðŸŒ", lambda: abrir_mercado(janela))
-    criar_botao_menu(meio, "ðŸŽ®", lambda: abrir_controle(janela))
-    criar_botao_menu(meio, "âš™ï¸", lambda: abrir_config(janela))
+    criar_botao_menu(meio, "Início", lambda: escrever_log(log, "Tela inicial", "info"))
+    criar_botao_menu(meio, "Mercado", lambda: abrir_mercado(janela))
+    criar_botao_menu(meio, "Controle", lambda: abrir_controle(janela))
+    criar_botao_menu(meio, "Config", lambda: abrir_config(janela))
 
     btn_sair = tk.Label(
-        baixo, text="âŒ", bg="#0a0f14", fg="#ef4444", font=("Arial", 16), cursor="hand2"
+        baixo,
+        text="Sair",
+        bg="#0a0f14",
+        fg="#ef4444",
+        font=("Arial", 12, "bold"),
+        cursor="hand2",
     )
     btn_sair.pack(pady=15)
     btn_sair.bind("<Enter>", lambda e: btn_sair.config(bg="#111827"))
@@ -2099,7 +2123,7 @@ def montar_painel():
             # ðŸ§  log sÃ³ 1x
             if candle_atual != ultimo_log_candle:
                 ultimo_log_candle = candle_atual
-                janela.after(0, escrever_log, log, "ðŸ§  Nova vela", "info")
+                janela.after(0, escrever_log, log, "Nova vela", "info")
 
             # ðŸš« evita repetir entrada
             if candle_atual == ultimo_candle_operado:
@@ -2145,14 +2169,14 @@ def montar_painel():
             if direcao:
                 ultimo_candle_operado = candle_atual
 
-                janela.after(0, escrever_log, log, f"ðŸš€ {direcao.upper()}", "info")
+                janela.after(0, escrever_log, log, f"{direcao.upper()}", "info")
 
                 if direcao == "call":
                     ultimo_sinal = "CALL"
-                    info_label.config(text="CALL â†‘", fg="#00e676")
+                    info_label.config(text="CALL ↑", fg="#00e676")
                 else:
                     ultimo_sinal = "PUT"
-                    info_label.config(text="PUT â†“", fg="#ff5252")
+                    info_label.config(text="PUT ↓", fg="#ff5252")
 
                 fazer_entrada(par_var.get(), valor_atual, direcao)
 
@@ -2188,7 +2212,7 @@ def montar_painel():
         stop_ativo = False
         tipo_stop = None
 
-        escrever_log(log, "ðŸ¤– ROBÃ” AUTOMÃTICO ATIVO", "info")
+        escrever_log(log, "ROBÔ AUTOMÁTICO ATIVO", "info")
         lbl_modo.config(text="AUTO", fg="#00e676")
         lbl_on_status.itemconfig("dot", fill="#00e676", outline="#00e676")
         lbl_on_status.itemconfig("dot_text", text="ON")
@@ -2205,7 +2229,7 @@ def montar_painel():
         loop_auto_rodando = False
         modo_operacao = "manual"
 
-        escrever_log(log, "âœ‹ MODO MANUAL ATIVO", "info")
+        escrever_log(log, "MODO MANUAL ATIVO", "info")
         lbl_modo.config(text="MANUAL", fg="#ff5252")
         lbl_on_status.itemconfig("dot", fill="#ff3333", outline="#ff3333")
         lbl_on_status.itemconfig("dot_text", text="OFF")
@@ -2213,7 +2237,7 @@ def montar_painel():
 
     def entrada_manual(direcao):
         global operando, modo_operacao
-        janela.after(0, escrever_log, log, f"ðŸ–±ï¸ ENTRADA: {direcao.upper()}", "info")
+        janela.after(0, escrever_log, log, f"ENTRADA: {direcao.upper()}", "info")
         modo_operacao = "manual"
         if not operando:
             fazer_entrada(par_var.get(), valor_atual, direcao)
@@ -2277,7 +2301,7 @@ def montar_painel():
     def mudar_par(event=None):
         global ultimo_par
         novo_par = par_var.get()
-        janela.after(0, escrever_log, log, f"ðŸ”„ Par alterado: {novo_par}", "info")
+        janela.after(0, escrever_log, log, f"Par alterado: {novo_par}", "info")
 
         def _do_change():
             global ultimo_par
@@ -2289,7 +2313,7 @@ def montar_painel():
                         pass
                 try:
                     Iq.start_candles_stream(novo_par, 60, 10)
-                    janela.after(0, escrever_log, log, f"âœ… Stream atualizado", "info")
+                    janela.after(0, escrever_log, log, f"Stream atualizado", "info")
                 except Exception as e:
                     janela.after(0, escrever_log, log, f"ERRO STREAM: {e}", "info")
             finally:
@@ -2321,7 +2345,7 @@ def montar_painel():
         tf_seconds = tf_map.get(novo_tf, 60)
 
         janela.after(
-            0, escrever_log, log, f"â±ï¸ Timeframe: {novo_tf} ({tf_seconds}s)", "info"
+            0, escrever_log, log, f"Timeframe: {novo_tf} ({tf_seconds}s)", "info"
         )
 
         def _do_change():
@@ -2335,13 +2359,11 @@ def montar_painel():
                     time.sleep(0.2)
                     try:
                         Iq.start_candles_stream(par, tf_seconds, 10)
-                        janela.after(
-                            0, escrever_log, log, f"âœ… Stream atualizado", "info"
-                        )
+                        janela.after(0, escrever_log, log, f"Stream atualizado", "info")
                     except Exception as e:
-                        janela.after(0, escrever_log, log, f"âŒ ERRO: {e}", "info")
+                        janela.after(0, escrever_log, log, f"ERRO: {e}", "info")
             except Exception as e:
-                janela.after(0, escrever_log, log, f"âŒ ERRO: {e}", "info")
+                janela.after(0, escrever_log, log, f"ERRO: {e}", "info")
 
         threading.Thread(target=_do_change, daemon=True).start()
 
@@ -2574,7 +2596,7 @@ def iniciar(Iq_recebido, saldo=None, email=None, senha=None):
 
     montar_painel()
 
-    janela.after(0, escrever_log, log, "âœ… IQ conectado com sucesso", "info")
+    janela.after(0, escrever_log, log, "IQ conectado com sucesso", "info")
 
     # Iniciar stream e carregar candles em segundo plano para nÃ£o travar UI
     def _init_stream_and_candles():
@@ -2596,7 +2618,7 @@ def iniciar(Iq_recebido, saldo=None, email=None, senha=None):
 
                 janela.after(0, _apply)
 
-            janela.after(0, escrever_log, log, "ðŸ“Š Candles carregados", "info")
+            janela.after(0, escrever_log, log, "Candles carregados", "info")
         except Exception as e:
             janela.after(0, escrever_log, log, f"ERRO INICIAR STREAM: {e}", "info")
 
@@ -2639,9 +2661,8 @@ def iniciar(Iq_recebido, saldo=None, email=None, senha=None):
     centralizar(janela)  # move pro centro
     janela.attributes("-alpha", 1)  # mostra de vez
 
-    janela.after(500, escrever_log, log, "ðŸ“Š Candles carregados", "info")
+    janela.after(500, escrever_log, log, "Candles carregados", "info")
 
 
 abrir_login(janela, iniciar)
 janela.mainloop()
-

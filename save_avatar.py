@@ -18,7 +18,7 @@ def save_bytes(data: bytes, out_path: str):
     os.makedirs(os.path.dirname(out_path), exist_ok=True)
     with open(out_path, "wb") as f:
         f.write(data)
-    print("Saved:", out_path)
+    print("Salvo:", out_path)
 
 
 def from_url(url: str, out: str):
@@ -27,7 +27,7 @@ def from_url(url: str, out: str):
             data = resp.read()
         save_bytes(data, out)
     except Exception as e:
-        print("ERROR downloading URL:", e)
+        print("Erro ao baixar URL:", e)
         sys.exit(2)
 
 
@@ -39,7 +39,7 @@ def from_base64_string(s: str, out: str):
         data = base64.b64decode(s)
         save_bytes(data, out)
     except Exception as e:
-        print("ERROR decoding base64:", e)
+        print("Erro ao decodificar base64:", e)
         sys.exit(3)
 
 
@@ -49,7 +49,7 @@ def from_base64_file(path: str, out: str):
             s = f.read().strip()
         from_base64_string(s, out)
     except Exception as e:
-        print("ERROR reading base64 file:", e)
+        print("Erro ao ler arquivo base64:", e)
         sys.exit(4)
 
 
