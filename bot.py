@@ -2,9 +2,14 @@
 
 IQ_Option = None
 try:
-    from iqoptionapi.api import IQOptionAPI as IQ_Option
+    from iq_adapter import IQ_Option
 except Exception:
     IQ_Option = None
+    try:
+        from iqoptionapi.api import IQOptionAPI as IQ_Option
+    except Exception:
+        IQ_Option = None
+import os
 
 import time
 
@@ -17,8 +22,27 @@ Iq = None
 def conectar(email, senha):
     global Iq
 
-    Iq = IQ_Option(email, senha)
-    check, reason = Iq.connect()
+    # Respeita modo dummy para testes locais
+    if os.getenv("USE_DUMMY_IQ") == "1":
+
+        class DummyIQ:
+            def __init__(self):
+                try:
+                    self._balance = float(os.getenv("ADMIN_SALDO", "1000"))
+                except Exception:
+                    self._balance = 1000.0
+
+            def connect(self):
+                return (True, None)
+
+            def get_balance(self):
+                return float(self._balance)
+
+        Iq = DummyIQ()
+    else:
+        Iq = IQ_Option(email, senha)
+
+    check, reason = Iq.connect() if hasattr(Iq, "connect") else (True, None)
 
     if check:
         print("Conectado ✔")
