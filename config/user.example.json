@@ -1,0 +1,9 @@
+{
+    "email": "seu_email@example.com",
+    "password": "SUA_SENHA_AQUI",
+    "admin_senha": "senha_admin",
+    "other_settings": {
+        "modo_teste": true,
+        "saldo_inicial": 1000
+    }
+}

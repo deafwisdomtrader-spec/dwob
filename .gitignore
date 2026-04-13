@@ -40,6 +40,18 @@ Thumbs.db
 .env
 env.json
 
+# Virtual env variants created in this project
+.venv-1/
+
+# Logs and backups
+logs/
+logs/*.log
+backup DWOB/
+dwob_untracked_backup*/
+
+# Local config (example present in repo)
+config/user.json
+
 # Database
 *.db
 *.sqlite3

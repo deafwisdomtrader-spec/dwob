@@ -1,36 +1,55 @@
 # Painel DWOB - MHI EVO
 
-Projeto GUI em Python que implementa um painel para monitoramento/controle de um robô MHI (integração com IQ Option).
+Painel GUI em Python para monitoramento e operação do robô MHI (integração opcional com IQ Option).
 
-Como executar (Windows):
+Resumo
+- Interface gráfica simples baseada em `tkinter`.
+- Camada de adaptação para variações do pacote `iqoptionapi` (`iq_adapter.py`).
+- Modo `DummyIQ` para testar a interface sem conectar à corretora.
 
-1. Crie e ative um virtualenv no diretório do projeto:
+Requisitos
+- Python 3.10+ (Windows recomendado para execução com `tkinter`).
+- Recommended: criar virtualenv e instalar dependências abaixo.
+
+Instalação (Windows)
 
 ```powershell
 python -m venv .venv
 .\.venv\Scripts\Activate.ps1
-```
-
-2. Instale dependências:
-
-```powershell
 python -m pip install -r requirements.txt
 ```
 
-3. Execute:
+Executando
 
 ```powershell
 python painel.py
 ```
 
-Notas importantes:
-- O projeto usa `tkinter` (incluso no Python padrão) e `Pillow` para manipulação de imagens.
-- A integração com IQ Option depende do pacote `iqoptionapi`. O código tenta usar `iqoptionapi.api` e faz fallback quando necessário.
-- Arquivo `painel.py` foi ajustado para mensagens de log em português e para mostrar `logo.png` no popup de Stop.
+Modo de teste (sem conta real)
+- Para rodar sem conectar à IQ Option, use a variável de ambiente `USE_DUMMY_IQ=1`:
 
-Modificações recentes:
-- Tradução de logs para português.
-- Popup de Stop exibe `images/logo.png` acima do campo de valor.
-- Adicionado `.gitignore`.
+```powershell
+$env:USE_DUMMY_IQ = "1"  # PowerShell
+python painel.py
+```
 
-Se quiser, posso gerar um `requirements.txt` com versões específicas a partir do seu ambiente virtual.
+Configuração
+- Há um arquivo de exemplo `config/user.example.json`. Copie para `config/user.json` e preencha as credenciais apenas se for necessário.
+- Nunca comite credenciais reais. O repositório contém instruções e exemplos para evitar vazamento de segredos.
+
+Notas sobre `iqoptionapi`
+- Existem forks e versões diferentes do pacote `iqoptionapi` que expõem interfaces distintas (`iqoptionapi.api` vs `iqoptionapi.stable_api`).
+- O projeto inclui `iq_adapter.py` para compatibilidade; para uso em produção, prefira fixar (pin) uma versão conhecida do pacote ou manter o adapter.
+
+Publicação / Empacotamento
+- Verifique `.gitignore` e remova arquivos sensíveis antes de subir para o GitHub.
+- Use `USE_DUMMY_IQ=1` para demonstrações públicas.
+
+Ajuda
+- Se quiser, posso:
+	- Gerar e commitar `requirements.txt` com versões do seu ambiente.
+	- Revisar e remover arquivos sensíveis do histórico Git.
+	- Preparar instruções passo-a-passo para empacotar com PyInstaller.
+
+--
+Arquivo gerado automaticamente por assistente — edite conforme necessário.
