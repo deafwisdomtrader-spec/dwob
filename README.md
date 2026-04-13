@@ -46,10 +46,9 @@ Publicação / Empacotamento
 - Use `USE_DUMMY_IQ=1` para demonstrações públicas.
 
 Ajuda
-- Se quiser, posso:
-	- Gerar e commitar `requirements.txt` com versões do seu ambiente.
-	- Revisar e remover arquivos sensíveis do histórico Git.
-	- Preparar instruções passo-a-passo para empacotar com PyInstaller.
+- **Gerar e commitar `requirements.txt`** com versões do seu ambiente (feito).
+- **Revisar e remover arquivos sensíveis do histórico Git** (posso executar se confirmar).
+- **Preparar empacotamento com PyInstaller** e instruções de distribuição.
 
 --
 Arquivo gerado automaticamente por assistente — edite conforme necessário.

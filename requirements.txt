@@ -1,7 +1,9 @@
-requests>=2.33.0
-Pillow>=9.0.0
-websocket-client>=1.5.1
-websockets>=10.0
-python-dotenv>=1.0.0
-# iqoptionapi: forks differ; leave unpinned or pin a tested fork for production
-iqoptionapi>=0.5
+requests==2.33.0
+Pillow==9.5.0
+websocket-client==1.5.1
+websockets==10.4
+python-dotenv==1.0.0
+# Note: `iqoptionapi` has multiple incompatible forks. For production,
+# pin a specific fork or keep it unpinned. Example (uncomment to pin):
+# git+https://github.com/Lu-Yi-Hsun/iqoptionapi@master#egg=iqoptionapi
+# or leave out to avoid installing an untrusted fork.
