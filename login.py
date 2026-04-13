@@ -10,6 +10,17 @@ try:
 except Exception:
     # Permite importar o módulo sem a dependência instalada (útil para testes UI locais)
     IQ_Option = None
+try:
+    from iq_adapter import IQ_Option
+except Exception:
+    IQ_Option = None
+    try:
+        from iqoptionapi.api import IQOptionAPI as IQ_Option
+    except Exception:
+        IQ_Option = None
+# Allow forcing the DummyIQ for local testing via env var
+if os.getenv("USE_DUMMY_IQ") == "1":
+    IQ_Option = None
 import sqlite3
 import threading
 import time
@@ -529,27 +540,131 @@ def abrir_login(root, callback_sucesso):
             return
 
         try:
-            # 🔥 CONECTA IQ (se IQ_Option ausente, usa DummyIQ para testes locais)
-            if IQ_Option is None:
+            # 🔥 CONECTA IQ (se IQ_Option ausente ou modo dummy forçado, usa DummyIQ para testes locais)
+            if IQ_Option is None or os.getenv("USE_DUMMY_IQ") == "1":
 
                 class DummyIQ:
                     def __init__(self, *a, **k):
-                        pass
+                        # saldo inicial configurável via env ADMIN_SALDO
+                        try:
+                            self.balance = float(os.getenv("ADMIN_SALDO", "1000"))
+                        except Exception:
+                            self.balance = 1000.0
+                        self._next_id = 1000
+                        self._open_ops = {}
+                        # structured logging (JSONL) with simple rotation
+                        self._log_dir = os.path.join(os.getcwd(), "logs")
+                        try:
+                            os.makedirs(self._log_dir, exist_ok=True)
+                        except Exception:
+                            pass
+                        self._log_path = os.path.join(self._log_dir, "dummy_iq.log")
+                        self._max_log_size = 1024 * 1024
+
+                    def _rotate_if_needed(self):
+                        try:
+                            if (
+                                os.path.exists(self._log_path)
+                                and os.path.getsize(self._log_path) > self._max_log_size
+                            ):
+                                bak = self._log_path + ".1"
+                                try:
+                                    if os.path.exists(bak):
+                                        os.remove(bak)
+                                except Exception:
+                                    pass
+                                try:
+                                    os.replace(self._log_path, bak)
+                                except Exception:
+                                    pass
+                        except Exception:
+                            pass
+
+                    def _log(self, event, **data):
+                        try:
+                            self._rotate_if_needed()
+                            entry = {
+                                "ts": datetime.datetime.utcnow().isoformat() + "Z",
+                                "event": event,
+                                "data": data,
+                            }
+                            import json
+
+                            with open(self._log_path, "a", encoding="utf-8") as f:
+                                f.write(json.dumps(entry, ensure_ascii=False) + "\n")
+                        except Exception:
+                            pass
 
                     def connect(self):
                         return (True, None)
 
                     def change_balance(self, mode):
+                        # mode ignored in dummy
                         return True
 
                     def get_balance(self):
-                        return 1000.0
+                        return float(self.balance)
 
                     def buy(self, valor, par, direcao, timeframe):
-                        return (True, 12345)
+                        # simulate immediate acceptance, store open op
+                        try:
+                            valor = float(valor)
+                        except Exception:
+                            valor = 1.0
+                        opid = self._next_id
+                        self._next_id += 1
+                        now = int(time.time())
+                        self._open_ops[opid] = {
+                            "amount": valor,
+                            "par": par,
+                            "dir": direcao,
+                            "tf": timeframe,
+                            "ts": now,
+                        }
+                        # decrease balance immediately to simulate locked amount
+                        self.balance -= valor
+                        try:
+                            self._log(
+                                "buy",
+                                id=opid,
+                                par=par,
+                                dir=direcao,
+                                tf=timeframe,
+                                amount=valor,
+                            )
+                        except Exception:
+                            pass
+                        return (True, opid)
 
                     def check_win_v3(self, id_op):
-                        return (True, 1.0)
+                        # simulate result: 70% chance win 0.8x, else -1x
+                        op = self._open_ops.pop(id_op, None)
+                        if op is None:
+                            return (False, None)
+                        import random
+
+                        if random.random() < 0.7:
+                            profit = round(op["amount"] * 0.8, 2)
+                            self.balance += op["amount"] + profit
+                            try:
+                                self._log(
+                                    "result", id=id_op, outcome="win", amount=profit
+                                )
+                            except Exception:
+                                pass
+                            return (True, profit)
+                        else:
+                            # lost amount already subtracted
+                            try:
+                                self._log(
+                                    "result",
+                                    id=id_op,
+                                    outcome="lost",
+                                    amount=op["amount"],
+                                )
+                            except Exception:
+                                pass
+                            return (False, -op["amount"])
 
                     def start_candles_stream(self, *a, **k):
                         return None
@@ -565,34 +680,38 @@ def abrir_login(root, callback_sucesso):
                         return True
 
                     def get_candles(self, par, timeframe, qtd, now):
-                        # Retorna lista de candles simples: dicts com open/close/max/min
-                        now = int(time.time())
+                        # Return list of candle dicts with realistic variation
+                        now = int(time.time()) if now is None else int(now)
                         res = []
+                        base = 1.0000 + (hash(par) % 100) * 0.0001
                         for i in range(qtd):
-                            o = 1.0 + (i % 5) * 0.001
-                            c = o + (0.001 if i % 2 == 0 else -0.0005)
+                            o = base + (i - qtd) * 0.0003
+                            c = o + (0.0005 if i % 2 == 0 else -0.0004)
+                            hi = max(o, c) + 0.0002
+                            lo = min(o, c) - 0.0002
                             res.append(
                                 {
-                                    "open": o,
-                                    "close": c,
-                                    "max": max(o, c),
-                                    "min": min(o, c),
+                                    "open": round(o, 6),
+                                    "close": round(c, 6),
+                                    "max": round(hi, 6),
+                                    "min": round(lo, 6),
                                 }
                             )
                         return res
 
                     def get_realtime_candles(self, par, timeframe=60):
                         now = int(time.time())
-                        # Retorna dicionário similar ao real: key-> {from, open, close, max, min}
                         out = {}
                         for i in range(10):
                             ts = now - (9 - i) * timeframe
+                            o = 1.0 + (i % 5) * 0.0005
+                            c = o + (0.001 if i % 2 == 0 else -0.0003)
                             out[str(i)] = {
                                 "from": ts,
-                                "open": 1.0,
-                                "close": 1.0 + (i % 2) * 0.001,
-                                "max": 1.002,
-                                "min": 0.998,
+                                "open": round(o, 6),
+                                "close": round(c, 6),
+                                "max": round(max(o, c) + 0.0002, 6),
+                                "min": round(min(o, c) - 0.0002, 6),
                             }
                         return out
 
